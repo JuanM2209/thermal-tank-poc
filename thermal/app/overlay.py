@@ -12,40 +12,40 @@ _FONT = cv2.FONT_HERSHEY_SIMPLEX
 _MONO = cv2.FONT_HERSHEY_DUPLEX
 
 
-def _draw_timestamp_badge(img, *, x: int = 8, y: int = 8) -> None:
-    """Burn a date+time badge into the top-left corner (mutates `img`)."""
+def _draw_corner_badge(img, fps_actual: float | None) -> None:
+    """Burn a compact date+time+fps badge into the bottom-right corner."""
     now = datetime.now()
-    date_str = now.strftime("%Y-%m-%d")
-    time_str = now.strftime("%H:%M:%S")
+    stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    fps_str = f"{fps_actual:.0f} fps" if fps_actual is not None else ""
 
-    # Scale font to frame size so it reads cleanly at 512x384 (default 2x upscale).
     H, W = img.shape[:2]
-    fs = max(0.40, min(0.62, W / 900.0))
+    fs = max(0.32, min(0.44, W / 1400.0))
     th = 1
 
-    (dw, dh), _ = cv2.getTextSize(date_str, _MONO, fs, th)
-    (tw, tH), _ = cv2.getTextSize(time_str, _MONO, fs, th)
-    pad_x, pad_y, gap = 8, 6, 4
-    box_w = max(dw, tw) + pad_x * 2
-    box_h = dh + tH + gap + pad_y * 2
+    parts = [stamp]
+    if fps_str:
+        parts.append(fps_str)
+    text = "  ".join(parts)
 
-    # Translucent dark background
+    (tw, th_px), _ = cv2.getTextSize(text, _MONO, fs, th)
+    pad_x, pad_y = 6, 4
+    box_w = tw + pad_x * 2
+    box_h = th_px + pad_y * 2
+
+    x = W - box_w - 8
+    y = H - box_h - 8
+    if x < 0 or y < 0:
+        return
+
     bg = img[y : y + box_h, x : x + box_w].copy()
     cv2.rectangle(bg, (0, 0), (box_w, box_h), (14, 14, 18), -1)
     cv2.addWeighted(bg, 0.72, img[y : y + box_h, x : x + box_w], 0.28, 0,
                     img[y : y + box_h, x : x + box_w])
-    # Left accent bar (blue)
-    cv2.rectangle(img, (x, y), (x + 3, y + box_h), (220, 140, 40), -1)
-    # Outline
+    cv2.rectangle(img, (x, y), (x + 2, y + box_h), (220, 140, 40), -1)
     cv2.rectangle(img, (x, y), (x + box_w, y + box_h), (60, 60, 70), 1)
 
-    # Text (date dimmer, time brighter)
-    date_y = y + pad_y + dh
-    time_y = date_y + gap + tH
-    cv2.putText(img, date_str, (x + pad_x, date_y),
-                _MONO, fs, (185, 185, 195), th, cv2.LINE_AA)
-    cv2.putText(img, time_str, (x + pad_x, time_y),
-                _MONO, fs, (255, 255, 255), th, cv2.LINE_AA)
+    cv2.putText(img, text, (x + pad_x, y + pad_y + th_px - 1),
+                _MONO, fs, (235, 235, 240), th, cv2.LINE_AA)
 
 
 def _fmt_temp(t: float, unit: str = "C") -> str:
@@ -140,14 +140,11 @@ def draw_frame_overlay(img, *, tanks, results, tmin, tmax, hot, cold,
                     (bar_x - 50, bar_y + bar_h + 2), _FONT, 0.4,
                     (255, 255, 255), 1, cv2.LINE_AA)
 
-    # Timestamp badge (top-left) — burned in so it's visible in recordings, snapshots, MJPEG
-    if overlay_cfg.get("timestamp", True):
-        _draw_timestamp_badge(out, x=8, y=8)
-
-    # FPS counter (bottom-left so it doesn't fight the timestamp)
-    if overlay_cfg.get("fps_counter"):
-        cv2.putText(out, f"{fps_actual:.0f} fps",
-                    (8, H - 8), _FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    # Compact badge (bottom-right): timestamp + FPS merged.
+    show_ts = overlay_cfg.get("timestamp", True)
+    show_fps = overlay_cfg.get("fps_counter", True)
+    if show_ts or show_fps:
+        _draw_corner_badge(out, fps_actual if show_fps else None)
 
     return out
 

@@ -127,10 +127,18 @@ class WebServer:
 
         @app.route("/stream.mjpg")
         def stream():
-            return Response(
+            resp = Response(
                 self._mjpeg_gen(),
                 mimetype="multipart/x-mixed-replace; boundary=frame",
+                direct_passthrough=True,
             )
+            # Defeat proxy buffering so CF Tunnel + chisel don't add 5-10s lag.
+            resp.headers["X-Accel-Buffering"] = "no"
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+            resp.headers["Connection"] = "close"
+            return resp
 
         @app.route("/api/state")
         def api_state():
@@ -282,6 +290,85 @@ class WebServer:
                     "medium_dominant": result.medium_dominant,
                     "thermal_delta_c": result.thermal_delta_c,
                 },
+            })
+
+        @app.route("/api/measure", methods=["POST"])
+        def api_measure():
+            """Shape-based temperature query.
+
+            Body: {shape: "point"|"line"|"box"|"polygon", coords: [...], coord_space: "rendered"|"sensor"}
+              point   coords: [[x, y]]
+              line    coords: [[x1, y1], [x2, y2]]
+              box     coords: [[x1, y1], [x2, y2]]  (two corners)
+              polygon coords: [[x, y], [x, y], ...] (>= 3 points)
+            Coordinates default to rendered-frame space (what the client canvas sees)
+            and are automatically downscaled to sensor-space.
+            """
+            body = request.get_json(silent=True) or {}
+            shape = str(body.get("shape", "point")).lower()
+            coords = body.get("coords") or []
+            if not isinstance(coords, list) or not coords:
+                return jsonify({"err": "bad-coords"}), 400
+
+            s = SHARED.snapshot()
+            if s.thermal is None:
+                return jsonify({"err": "no-frame"}), 503
+            H, W = s.thermal.shape
+            upscale = max(1, int(s.rendered_upscale or 1))
+            space = str(body.get("coord_space", "rendered")).lower()
+            scale = 1.0 / upscale if space == "rendered" else 1.0
+
+            def _pt(xy):
+                x = int(round(float(xy[0]) * scale))
+                y = int(round(float(xy[1]) * scale))
+                return max(0, min(W - 1, x)), max(0, min(H - 1, y))
+
+            try:
+                if shape == "point":
+                    x, y = _pt(coords[0])
+                    x0, x1 = max(0, x - 1), min(W, x + 2)
+                    y0, y1 = max(0, y - 1), min(H, y + 2)
+                    vals = s.thermal[y0:y1, x0:x1].flatten()
+                elif shape == "line":
+                    if len(coords) < 2:
+                        return jsonify({"err": "need 2 points"}), 400
+                    x1, y1 = _pt(coords[0])
+                    x2, y2 = _pt(coords[1])
+                    length = max(1, int(np.hypot(x2 - x1, y2 - y1)))
+                    xs = np.linspace(x1, x2, length).astype(int)
+                    ys = np.linspace(y1, y2, length).astype(int)
+                    vals = s.thermal[ys, xs]
+                elif shape == "box":
+                    if len(coords) < 2:
+                        return jsonify({"err": "need 2 corners"}), 400
+                    x1, y1 = _pt(coords[0])
+                    x2, y2 = _pt(coords[1])
+                    xmin, xmax = sorted((x1, x2))
+                    ymin, ymax = sorted((y1, y2))
+                    vals = s.thermal[ymin:ymax + 1, xmin:xmax + 1].flatten()
+                elif shape == "polygon":
+                    if len(coords) < 3:
+                        return jsonify({"err": "need >= 3 points"}), 400
+                    pts = np.array([_pt(p) for p in coords], dtype=np.int32)
+                    mask = np.zeros((H, W), dtype=np.uint8)
+                    cv2.fillPoly(mask, [pts], 1)
+                    vals = s.thermal[mask.astype(bool)]
+                else:
+                    return jsonify({"err": f"bad shape: {shape}"}), 400
+            except Exception as e:
+                return jsonify({"err": f"measure failed: {e}"}), 500
+
+            if vals is None or len(vals) == 0:
+                return jsonify({"err": "empty"}), 400
+
+            vals = np.asarray(vals, dtype=np.float32)
+            return jsonify({
+                "shape": shape,
+                "min": round(float(vals.min()), 2),
+                "max": round(float(vals.max()), 2),
+                "avg": round(float(vals.mean()), 2),
+                "median": round(float(np.median(vals)), 2),
+                "count": int(vals.size),
             })
 
         @app.route("/api/line")
