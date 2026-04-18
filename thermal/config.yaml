@@ -14,6 +14,9 @@ camera:
   fps: 25
   decoder: dual_yuyv
   kelvin_divisor: 64.0
+  # Set to true to auto-probe /dev/video* and pick the matching VID:PID at start
+  autodetect: true
+  vid_pid: "0bda:5830"
 
 analysis:
   interval_seconds: 2
@@ -21,10 +24,14 @@ analysis:
   min_samples: 5
   gradient_method: sobel
   invert_level: false
+  # Drop publish when overall confidence is below this (low/high). Prevents
+  # the Node-RED chart from filling with garbage 0/100 spikes when the ROI
+  # is not pointing at a real tank wall.
+  publish_only_high_confidence: true
 
 tanks:
   # Placeholder ROIs — will be set after the camera points at real tanks.
-  # Run `tools/roi_picker.py` on any machine with the camera to get real coords.
+  # You can also draw them interactively on the web dashboard (pencil icon).
   - id: tank_01
     name: "Tank 1"
     medium: water
@@ -46,7 +53,38 @@ publisher:
 stream:
   enabled: true
   port: 8080
-  fps: 5
+  fps: 20              # was 5 — the camera does 25 natively
   upscale: 2
   jpeg_quality: 75
   draw_overlay: true
+  # Which frame the MJPEG stream shows:
+  #   visual   -> top half of dual frame (grayscale visible-light)
+  #   thermal  -> palette-rendered bottom half (hottest = bright)
+  #   blend    -> thermal palette blended with visual
+  source: thermal
+  # Palette: grayscale | iron | rainbow | hot | inferno | plasma | jet | magma | turbo | cividis
+  palette: iron
+  # Temperature overlays painted on the stream
+  overlay:
+    roi_boxes: true
+    level_line: true
+    min_marker: true
+    max_marker: true
+    center_crosshair: false
+    grid: false
+    temp_scale: true       # colorbar with min/max °C
+    fps_counter: true
+    tank_labels: true
+
+# Web dashboard specifics (served by the Flask app on stream.port)
+ui:
+  title: "Thermal Tank Monitor"
+  # Units the UI displays
+  temp_unit: C          # C | F
+  # Emissivity (adjust per medium — water ~0.96, oil ~0.94, steel painted ~0.9)
+  emissivity: 0.95
+  # Reflective / background temperature (°C), used if you later add emissivity
+  # correction. Harmless default.
+  reflect_temp_c: 20.0
+  # Minimum gradient (°C) required to mark a tank reading as "trusted"
+  trust_threshold_c: 1.0

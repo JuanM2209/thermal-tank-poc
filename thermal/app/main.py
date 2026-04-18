@@ -1,17 +1,35 @@
-"""Thermal tank level detection — main orchestrator."""
+"""Thermal tank level detection — main orchestrator.
 
+Pipeline per frame:
+    capture -> (visual BGR, thermal °C)
+    palette.render(thermal) -> palette-rendered BGR + (tmin, tmax)
+    palette.find_hot_cold(thermal) -> hot, cold markers
+    overlay.draw(...) -> rendered frame with ROI boxes, markers, FPS, scale
+    analyzer.analyze(thermal) -> per-tank levels (publish when interval elapsed)
+    state.publish(...) -> latest frame snapshot for the web API
+    event detector -> level_change / low_confidence / camera_lost
+"""
+
+from __future__ import annotations
+
+import json
+import logging
 import os
+import signal
 import sys
 import time
-import signal
-import logging
-import yaml
-import cv2
+from collections import deque
 
-from capture import ThermalCapture
+import yaml
+
 from analyzer import TankAnalyzer
+from camera_detect import autodetect
+from capture import ThermalCapture
+from overlay import draw_frame_overlay
+from palette import find_hot_cold, render, blend_with_visual
 from publisher import HttpPublisher
-from stream import MjpegStreamer
+from state import SHARED
+from stream import WebServer
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -20,79 +38,126 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 
-def load_config(path="/app/config.yaml"):
+DEFAULT_CONFIG = "/app/config.yaml"
+RUNTIME_OVERRIDE = "/app/data/runtime.json"   # volume-mounted, survives restarts
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    for k, v in patch.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def load_config(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    # Apply persisted runtime overrides (from the web UI) if present
+    if os.path.exists(RUNTIME_OVERRIDE):
+        try:
+            with open(RUNTIME_OVERRIDE, "r", encoding="utf-8") as f:
+                overrides = json.load(f)
+            _deep_merge(cfg, overrides)
+            log.info(f"Runtime overrides merged from {RUNTIME_OVERRIDE}")
+        except Exception as e:
+            log.warning(f"Ignoring malformed runtime override: {e}")
+    return cfg
 
 
-def draw_overlay(img, tanks, results, upscale=1):
-    if img is None:
-        return None
-    out = img.copy()
-    res_by_id = {r["id"]: r for r in results}
-    for t in tanks:
-        r = t["roi"]
-        res = res_by_id.get(t["id"])
-        color = (0, 255, 0)
-        if res is None:
-            color = (128, 128, 128)
-        elif res["confidence"] != "high":
-            color = (0, 165, 255)
-        cv2.rectangle(out, (r["x"], r["y"]), (r["x"] + r["w"], r["y"] + r["h"]), color, 1)
-        if res is not None:
-            iy = r["y"] + res["interface_row"]
-            cv2.line(out, (r["x"], iy), (r["x"] + r["w"], iy), (0, 0, 255), 1)
-            label = f"{t['id']}:{res['level_pct']:.0f}%"
-            cv2.putText(out, label, (r["x"], max(8, r["y"] - 2)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv2.LINE_AA)
-    if upscale and upscale > 1:
-        out = cv2.resize(out, (out.shape[1] * upscale, out.shape[0] * upscale),
-                         interpolation=cv2.INTER_NEAREST)
-    return out
+def open_camera(cam_cfg: dict) -> ThermalCapture:
+    device = cam_cfg.get("device", "/dev/video0")
+    if cam_cfg.get("autodetect") and cam_cfg.get("vid_pid"):
+        device = autodetect(cam_cfg["vid_pid"], fallback=device)
+    cap = ThermalCapture(
+        device=device,
+        width=cam_cfg.get("width", 256),
+        height=cam_cfg.get("height", 384),
+        fps=cam_cfg.get("fps", 25),
+        decoder=cam_cfg.get("decoder", "dual_yuyv"),
+        kelvin_divisor=cam_cfg.get("kelvin_divisor", 64.0),
+    )
+    cap.open()
+    return cap
+
+
+class EventDetector:
+    """Emit level_change / low_confidence events without spamming."""
+    def __init__(self, min_level_delta: float = 5.0):
+        self.min_level_delta = min_level_delta
+        self._last_level: dict[str, float] = {}
+        self._last_conf:  dict[str, str] = {}
+
+    def scan(self, results):
+        for r in results:
+            prev = self._last_level.get(r["id"])
+            if prev is None or abs(prev - r["level_pct"]) >= self.min_level_delta:
+                SHARED.append_event("level_change", id=r["id"],
+                                    level_pct=r["level_pct"], prev=prev)
+                self._last_level[r["id"]] = r["level_pct"]
+            prev_c = self._last_conf.get(r["id"])
+            if prev_c != r["confidence"]:
+                if r["confidence"] == "low":
+                    SHARED.append_event("low_confidence", id=r["id"],
+                                        gradient_peak=r["gradient_peak"])
+                self._last_conf[r["id"]] = r["confidence"]
 
 
 def main():
-    cfg_path = os.environ.get("CONFIG", "/app/config.yaml")
+    cfg_path = os.environ.get("CONFIG", DEFAULT_CONFIG)
     cfg = load_config(cfg_path)
     log.info(f"Config loaded: {cfg_path}")
 
-    cap = ThermalCapture(**cfg["camera"])
-    cap.open()
+    # ------ camera ------
+    cap = open_camera(cfg["camera"])
 
+    # ------ analyzer ------
     analyzer = TankAnalyzer(
-        cfg["tanks"],
+        cfg.get("tanks", []),
         smoothing=cfg["analysis"].get("smoothing_window", 7),
         method=cfg["analysis"].get("gradient_method", "sobel"),
         invert_level=cfg["analysis"].get("invert_level", False),
     )
 
+    # ------ publisher (HTTP -> Node-RED) ------
     pub_cfg = cfg.get("publisher", {})
     endpoint = os.environ.get("PUBLISH_ENDPOINT", pub_cfg.get("endpoint"))
-    publisher = None
-    if endpoint:
-        publisher = HttpPublisher(endpoint, timeout=pub_cfg.get("timeout", 3.0))
-    else:
+    publisher = HttpPublisher(endpoint, timeout=pub_cfg.get("timeout", 3.0)) if endpoint else None
+    if not publisher:
         log.warning("No publisher.endpoint configured — running stream-only")
 
-    streamer = None
-    if cfg.get("stream", {}).get("enabled", False):
-        s = cfg["stream"]
-        streamer = MjpegStreamer(port=s.get("port", 8080), fps=s.get("fps", 5),
-                                 jpeg_quality=s.get("jpeg_quality", 75))
-        streamer.run()
+    # ------ web server ------
+    os.makedirs(os.path.dirname(RUNTIME_OVERRIDE), exist_ok=True) if os.path.isdir(os.path.dirname(RUNTIME_OVERRIDE)) else None
 
+    # When config is mutated via the web API, rebuild the analyzer and persist.
+    reload_flag = {"v": 0}
+    def _on_cfg_change():
+        reload_flag["v"] += 1
+
+    server = WebServer(
+        config=cfg,
+        on_config_change=_on_cfg_change,
+        persist_path=RUNTIME_OVERRIDE if os.path.isdir(os.path.dirname(RUNTIME_OVERRIDE)) else None,
+    )
+    if cfg.get("stream", {}).get("enabled", True):
+        server.run_threaded(port=cfg["stream"].get("port", 8080))
+
+    # ------ loop state ------
     interval = cfg["analysis"].get("interval_seconds", 2)
     running = {"v": True}
-
     def _stop(signo, _frame):
         log.info(f"Received signal {signo}, stopping...")
         running["v"] = False
-
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
     last_publish = 0.0
     frame_count = 0
+    fps_window = deque(maxlen=30)
+    last_tick = time.time()
+    local_reload_seen = 0
+    event_det = EventDetector(min_level_delta=cfg["analysis"].get("level_event_delta", 5.0))
     open("/tmp/alive", "w").close()
 
     while running["v"]:
@@ -103,28 +168,77 @@ def main():
                 continue
             frame_count += 1
 
+            # ---- live config (possibly just mutated via HTTP) ----
+            if reload_flag["v"] != local_reload_seen:
+                cfg = server.cfg()
+                analyzer = TankAnalyzer(
+                    cfg.get("tanks", []),
+                    smoothing=cfg["analysis"].get("smoothing_window", 7),
+                    method=cfg["analysis"].get("gradient_method", "sobel"),
+                    invert_level=cfg["analysis"].get("invert_level", False),
+                )
+                local_reload_seen = reload_flag["v"]
+                log.info(f"Config reloaded v={local_reload_seen}")
+
+            # ---- analyze ----
             results = analyzer.analyze(thermal)
 
-            now = time.time()
-            if results and (now - last_publish) >= interval:
-                if publisher:
-                    publisher.publish(results)
-                last_publish = now
-                summary = " | ".join(
-                    f"{r['id']}:{r['level_pct']:.0f}%({r['confidence'][0]})" for r in results
-                )
-                log.info(f"frame#{frame_count} {summary}")
+            # ---- palette render ----
+            stream_cfg = cfg.get("stream", {})
+            palette_name = stream_cfg.get("palette", "iron")
+            source = stream_cfg.get("source", "thermal")
+            if source == "visual" and visual is not None:
+                rendered, tmin, tmax = visual.copy(), float(thermal.min()), float(thermal.max())
+            else:
+                rendered, tmin, tmax = render(thermal, palette_name)
+                if source == "blend" and visual is not None:
+                    rendered = blend_with_visual(visual, rendered, alpha=0.55)
 
-            if streamer is not None and cfg["stream"].get("draw_overlay", True):
-                overlay = draw_overlay(
-                    visual, cfg["tanks"], results,
-                    upscale=cfg["stream"].get("upscale", 2),
-                )
-                if overlay is not None:
-                    streamer.update(overlay)
+            hot, cold = find_hot_cold(thermal)
+
+            # ---- overlay ----
+            fps_now = 0.0
+            if len(fps_window) > 1:
+                fps_now = (len(fps_window) - 1) / max(1e-3, fps_window[-1] - fps_window[0])
+            fps_window.append(time.time())
+
+            upscale = int(stream_cfg.get("upscale", 2))
+            rendered = draw_frame_overlay(
+                rendered,
+                tanks=cfg.get("tanks", []),
+                results=results,
+                tmin=tmin, tmax=tmax,
+                hot=hot, cold=cold,
+                overlay_cfg=stream_cfg.get("overlay", {}),
+                fps_actual=fps_now,
+                temp_unit=cfg.get("ui", {}).get("temp_unit", "C"),
+                upscale=upscale,
+            )
+
+            # ---- publish to Node-RED ----
+            now = time.time()
+            only_hi = cfg.get("analysis", {}).get("publish_only_high_confidence", False)
+            if results and (now - last_publish) >= interval:
+                pub_results = [r for r in results if r["confidence"] == "high"] if only_hi else results
+                if publisher and pub_results:
+                    publisher.publish(pub_results)
+                last_publish = now
+
+            # ---- events ----
+            event_det.scan(results)
+
+            # ---- share with web layer ----
+            SHARED.publish(
+                thermal=thermal, visual=visual, rendered=rendered,
+                rendered_upscale=upscale,
+                tmin=tmin, tmax=tmax,
+                hot=hot, cold=cold,
+                results=results, fps=fps_now, frame_idx=frame_count,
+            )
 
             if frame_count % 50 == 0:
                 os.utime("/tmp/alive", None)
+                log.info(f"frame#{frame_count} fps={fps_now:.1f} tanks={len(results)} tmin={tmin:.1f} tmax={tmax:.1f}")
 
         except KeyboardInterrupt:
             break
