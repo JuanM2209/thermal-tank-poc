@@ -129,6 +129,11 @@ LEGACY_GROUPS = {
 }
 our_ids = new_ids | LEGACY_GROUPS
 
+# Node-RED dashboard allows exactly one `ui_base` per /ui.
+# Our flow ships one (id="dash-ui-base") — drop any pre-existing one so
+# our theme (dark + blue) wins without creating a duplicate config node.
+SINGLETON_TYPES = {"ui_base"}
+
 # Fetch current flows
 req = urllib.request.Request(f"{nr_url}/flows", headers={"Accept": "application/json"})
 with urllib.request.urlopen(req, timeout=5) as r:
@@ -136,7 +141,9 @@ with urllib.request.urlopen(req, timeout=5) as r:
 
 kept = [
     n for n in current
-    if n.get("z") != "thermal-tab" and n.get("id") not in our_ids
+    if n.get("z") != "thermal-tab"
+    and n.get("id") not in our_ids
+    and n.get("type") not in SINGLETON_TYPES
 ]
 merged = kept + new_nodes
 

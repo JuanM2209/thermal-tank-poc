@@ -4,7 +4,63 @@
     "type": "tab",
     "label": "Thermal Tanks",
     "disabled": false,
-    "info": "Thermal tank Supervisor dashboard v0.4.0\n\nPOST endpoint:   /thermal/ingest  (pushed by the thermal-analyzer container)\nThermal API:     flow.thermal_base (default resolved from hostname, override with THERMAL_API)\n\nGroups:\n  • Overview       — site header + deep link to operator console (:8080)\n  • Tanks          — per-tank KPI cards (level, ft, bbl, rate, ETA)\n  • Trends         — 24 h level & temperature history (high-confidence only)\n  • Alerts         — persisted out-of-band history (bounded 200 rows)\n  • Events         — raw ingest log (collapsed)\n\nBreaking changes vs v0.3:\n  • `ts` is ALWAYS milliseconds (publisher guarantees). No unit math.\n  • Iframe removed. Live stream lives at the operator console, not in NR.\n  • Per-tank KPI cards replace the single ui_gauge (which collapsed multi-topic).\n  • Handles new payload fields: `reading`, `geometry`, `calibration`, `medium_confidence`, `site_id`.\n"
+    "info": "Thermal tank Supervisor dashboard v0.4.1\n\nPOST endpoint:   /thermal/ingest  (pushed by the thermal-analyzer container)\nThermal API:     flow.thermal_base (default resolved from hostname, override with THERMAL_API)\n\nGroups:\n  \u2022 Overview       \u2014 site header + deep link to operator console (:8080)\n  \u2022 Live View      \u2014 MJPEG stream from the operator console (hostname auto-derived)\n  \u2022 Level Gauges   \u2014 one donut per tank\n  \u2022 Tanks          \u2014 per-tank KPI cards (level, ft, bbl, rate, ETA)\n  \u2022 Trends         \u2014 24 h level & temperature history (high-confidence only)\n  \u2022 Alerts         \u2014 persisted out-of-band history (bounded 200 rows)\n  \u2022 Events         \u2014 raw ingest log (collapsed)\n\nBreaking changes vs v0.3:\n  \u2022 `ts` is ALWAYS milliseconds (publisher guarantees). No unit math.\n  \u2022 Per-tank KPI cards replace the single ui_gauge (which collapsed multi-topic).\n  \u2022 Handles new payload fields: `reading`, `geometry`, `calibration`, `medium_confidence`, `site_id`.\n"
+  },
+  {
+    "id": "dash-ui-base",
+    "type": "ui_base",
+    "theme": {
+      "name": "theme-dark",
+      "lightTheme": {
+        "default": "#0094CE",
+        "baseColor": "#0094CE",
+        "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif",
+        "edited": false,
+        "reset": false
+      },
+      "darkTheme": {
+        "default": "#2563eb",
+        "baseColor": "#2563eb",
+        "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif",
+        "edited": true,
+        "reset": false
+      },
+      "customTheme": {
+        "name": "Tyrion Blue",
+        "default": "#2563eb",
+        "baseColor": "#2563eb",
+        "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif"
+      },
+      "themeState": {
+        "base-color": { "default": "#097479", "value": "#2563eb", "edited": true },
+        "page-titlebar-backgroundColor": { "value": "#0d1117", "edited": true },
+        "page-backgroundColor": { "value": "#0a0e13", "edited": true },
+        "page-sidebar-backgroundColor": { "value": "#1e293b", "edited": true },
+        "group-textColor": { "value": "#e6e6e6", "edited": true },
+        "group-borderColor": { "value": "#2a3240", "edited": true },
+        "group-backgroundColor": { "value": "#1c222b", "edited": true },
+        "widget-textColor": { "value": "#e6e6e6", "edited": true },
+        "widget-backgroundColor": { "value": "#1c222b", "edited": true },
+        "widget-borderColor": { "value": "#2a3240", "edited": true },
+        "base-font": { "value": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif" }
+      },
+      "angularTheme": {
+        "primary": "indigo",
+        "accents": "blue",
+        "warn": "red",
+        "background": "grey",
+        "palette": "dark"
+      }
+    },
+    "site": {
+      "name": "Thermal Tank Supervisor",
+      "hideToolbar": "false",
+      "allowSwipe": "false",
+      "lockMenu": "false",
+      "allowTempTheme": "false",
+      "dateFormat": "DD/MM/YYYY",
+      "sizes": { "sx": 48, "sy": 48, "gx": 6, "gy": 6, "cx": 6, "cy": 6, "px": 0, "py": 0 }
+    }
   },
   {
     "id": "dash-tab",
@@ -26,11 +82,31 @@
     "collapse": false
   },
   {
+    "id": "dash-group-live-view",
+    "type": "ui_group",
+    "name": "Live View",
+    "tab": "dash-tab",
+    "order": 2,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "dash-group-gauges",
+    "type": "ui_group",
+    "name": "Level Gauges",
+    "tab": "dash-tab",
+    "order": 3,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
     "id": "dash-group-tanks",
     "type": "ui_group",
     "name": "Tanks",
     "tab": "dash-tab",
-    "order": 2,
+    "order": 4,
     "disp": true,
     "width": "12",
     "collapse": false
@@ -40,7 +116,7 @@
     "type": "ui_group",
     "name": "Trends (24 h)",
     "tab": "dash-tab",
-    "order": 3,
+    "order": 5,
     "disp": true,
     "width": "12",
     "collapse": false
@@ -50,7 +126,7 @@
     "type": "ui_group",
     "name": "Alerts",
     "tab": "dash-tab",
-    "order": 4,
+    "order": 6,
     "disp": true,
     "width": "12",
     "collapse": false
@@ -60,7 +136,7 @@
     "type": "ui_group",
     "name": "Events",
     "tab": "dash-tab",
-    "order": 5,
+    "order": 7,
     "disp": true,
     "width": "12",
     "collapse": true
@@ -124,12 +200,12 @@
     "type": "function",
     "z": "thermal-tab",
     "name": "Process ingest",
-    "func": "const p = msg.payload;\nif (!p || !Array.isArray(p.tanks)) {\n    msg.statusCode = 400;\n    msg.payload = { error: 'expected {ts, site_id, tanks:[...]}' };\n    return [null, null, null, null, msg, null, null];\n}\n\n// publisher.py v0.4+ ALWAYS sends `ts` as epoch-ms (int). No unit math.\nconst ts = typeof p.ts === 'number' ? p.ts : Date.now();\np.ts = ts;\nflow.set('latest', p);\nflow.set('latest_ts', ts);\n\n// Fan-out:\n//   [0] tank-cards  -> full payload (template renders all tanks)\n//   [1] chart-level -> {topic,name, payload:level_pct} per tank, high-conf only\n//   [2] chart-temp  -> {topic, payload:temp_avg} per tank, always\n//   [3] alerts      -> each tank for alert-guard\n//   [4] http response\n//   [5] events summary\n//   [6] overview header (site_id + calibration status)\nconst charts = [];\nconst temps  = [];\nconst alerts = [];\nfor (const t of p.tanks) {\n    const topic = t.name || t.id;\n    if (t.confidence === 'high' && typeof t.level_pct === 'number') {\n        charts.push({ topic, payload: t.level_pct });\n    }\n    if (typeof t.temp_avg === 'number') {\n        temps.push({ topic, payload: t.temp_avg });\n    }\n    alerts.push({ topic, payload: t.level_pct, _tank: t });\n}\n\nconst cards = { payload: p };\nconst header = {\n    payload: {\n        site_id: p.site_id || 'unknown',\n        ts,\n        n: p.tanks.length,\n        calibration: (p.tanks[0] && p.tanks[0].calibration) || null\n    }\n};\nconst summary = {\n    payload: {\n        n: p.tanks.length,\n        ts: new Date(ts).toISOString().replace('T',' ').slice(0,19) + 'Z'\n    }\n};\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, n: p.tanks.length };\nreturn [cards, charts, temps, alerts, msg, summary, header];",
+    "func": "const p = msg.payload;\nif (!p || !Array.isArray(p.tanks)) {\n    msg.statusCode = 400;\n    msg.payload = { error: 'expected {ts, site_id, tanks:[...]}' };\n    return [null, null, null, null, msg, null, null];\n}\n\n// publisher.py v0.4+ ALWAYS sends `ts` as epoch-ms (int). No unit math.\nconst ts = typeof p.ts === 'number' ? p.ts : Date.now();\np.ts = ts;\nflow.set('latest', p);\nflow.set('latest_ts', ts);\n\n// Fan-out:\n//   [0] tank-cards + gauges -> full payload (templates render all tanks)\n//   [1] chart-level         -> {topic,name, payload:level_pct} per tank, high-conf only\n//   [2] chart-temp          -> {topic, payload:temp_avg} per tank, always\n//   [3] alerts              -> each tank for alert-guard\n//   [4] http response\n//   [5] events summary\n//   [6] overview header (site_id + calibration status)\nconst charts = [];\nconst temps  = [];\nconst alerts = [];\nfor (const t of p.tanks) {\n    const topic = t.name || t.id;\n    if (t.confidence === 'high' && typeof t.level_pct === 'number') {\n        charts.push({ topic, payload: t.level_pct });\n    }\n    if (typeof t.temp_avg === 'number') {\n        temps.push({ topic, payload: t.temp_avg });\n    }\n    alerts.push({ topic, payload: t.level_pct, _tank: t });\n}\n\nconst cards = { payload: p };\nconst header = {\n    payload: {\n        site_id: p.site_id || 'unknown',\n        ts,\n        n: p.tanks.length,\n        calibration: (p.tanks[0] && p.tanks[0].calibration) || null\n    }\n};\nconst summary = {\n    payload: {\n        n: p.tanks.length,\n        ts: new Date(ts).toISOString().replace('T',' ').slice(0,19) + 'Z'\n    }\n};\n\nmsg.statusCode = 200;\nmsg.payload = { ok: true, n: p.tanks.length };\nreturn [cards, charts, temps, alerts, msg, summary, header];",
     "outputs": 7,
     "x": 370,
     "y": 120,
     "wires": [
-      ["tpl-tank-cards"],
+      ["tpl-tank-cards", "tpl-gauges"],
       ["chart-level"],
       ["chart-temp"],
       ["alert-guard"],
@@ -159,6 +235,44 @@
   },
 
   {
+    "id": "tpl-live-view",
+    "type": "ui_template",
+    "z": "thermal-tab",
+    "group": "dash-group-live-view",
+    "name": "Live thermal stream",
+    "order": 1,
+    "width": 12,
+    "height": 8,
+    "format": "<style>\n.lv{padding:6px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}\n.lv .hdr{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-bottom:6px}\n.lv .hdr .t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}\n.lv .hdr .tools{display:flex;gap:6px}\n.lv .hdr button{background:#1e293b;color:#cbd5e1;border:1px solid #2a3240;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600;transition:background .15s}\n.lv .hdr button:hover{background:#2a3240;color:#fff}\n.lv .wrap{position:relative;border-radius:12px;overflow:hidden;background:#000;border:1px solid #2a3240;min-height:260px;display:flex;align-items:center;justify-content:center}\n.lv .wrap img{width:100%;height:auto;display:block;max-height:520px;object-fit:contain}\n.lv .ph{color:#6b7280;font-family:monospace;font-size:12px;padding:30px}\n.lv .badge{position:absolute;top:10px;right:10px;padding:4px 10px;border-radius:10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;background:rgba(15,20,25,0.75);color:#4ade80;border:1px solid rgba(74,222,128,0.3)}\n.lv .badge .pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:5px;animation:lvp 1.2s ease-in-out infinite}\n.lv .badge.off{color:#f87171;border-color:rgba(248,113,113,0.3)}\n.lv .badge.off .pulse{background:#f87171;animation:none}\n@keyframes lvp{0%,100%{opacity:1}50%{opacity:0.35}}\n</style>\n<div class=\"lv\">\n  <div class=\"hdr\">\n    <span class=\"t\">Live Thermal Stream</span>\n    <div class=\"tools\">\n      <button id=\"lv-reload\" type=\"button\">Reload</button>\n    </div>\n  </div>\n  <div class=\"wrap\">\n    <div class=\"ph\" id=\"lv-ph\">connecting to thermal analyzer&hellip;</div>\n    <img id=\"lv-img\" alt=\"thermal stream\" style=\"display:none\"/>\n    <span class=\"badge\" id=\"lv-badge\"><span class=\"pulse\"></span>LIVE</span>\n  </div>\n</div>\n<script>\n(function(){\n  function deriveBase(){\n    var h = location.hostname;\n    var m = h.match(/^p1880-(n-[a-z0-9-]+)-(.*)$/i);\n    if (m) return location.protocol + '//p8080-' + m[1] + '-' + m[2];\n    return location.protocol + '//' + h + ':8080';\n  }\n  function boot(){\n    var img = document.getElementById('lv-img');\n    var ph  = document.getElementById('lv-ph');\n    var bg  = document.getElementById('lv-badge');\n    var btn = document.getElementById('lv-reload');\n    if (!img) return setTimeout(boot, 100);\n    function load(){\n      ph.style.display='block';\n      img.style.display='none';\n      ph.textContent='connecting to thermal analyzer\u2026';\n      bg.className='badge';\n      bg.innerHTML='<span class=\"pulse\"></span>LIVE';\n      img.onload  = function(){ ph.style.display='none'; img.style.display='block'; };\n      img.onerror = function(){ ph.style.display='block'; ph.textContent='stream unreachable \u2014 is the operator console running?'; img.style.display='none'; bg.className='badge off'; bg.innerHTML='<span class=\"pulse\"></span>OFFLINE'; };\n      img.src = deriveBase() + '/stream.mjpg?ts=' + Date.now();\n    }\n    btn.onclick = load;\n    load();\n  }\n  setTimeout(boot, 0);\n})();\n</script>",
+    "storeOutMessages": false,
+    "fwdInMessages": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "x": 640,
+    "y": 160,
+    "wires": [[]]
+  },
+
+  {
+    "id": "tpl-gauges",
+    "type": "ui_template",
+    "z": "thermal-tab",
+    "group": "dash-group-gauges",
+    "name": "Per-tank level gauges",
+    "order": 1,
+    "width": 12,
+    "height": 6,
+    "format": "<style>\n.gg{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;padding:10px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}\n.gg .cell{background:#1c222b;border:1px solid #2a3240;border-radius:12px;padding:14px;text-align:center;transition:border-color .2s}\n.gg .cell.hi{border-color:rgba(74,222,128,0.4)}\n.gg .cell.lo{border-color:rgba(251,191,36,0.4)}\n.gg .cell.al{border-color:rgba(248,113,113,0.5);box-shadow:0 0 0 1px rgba(248,113,113,0.3) inset}\n.gg .nm{font-size:12px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px;color:#cbd5e1}\n.gg .gw{position:relative;max-width:180px;margin:0 auto}\n.gg svg{width:100%;height:auto;display:block}\n.gg .track{stroke:#0f1419;fill:none;stroke-width:14}\n.gg .arc{fill:none;stroke-width:14;stroke-linecap:round;transition:stroke-dasharray .5s ease-out}\n.gg .arc.hi{stroke:#4ade80}\n.gg .arc.lo{stroke:#fbbf24}\n.gg .arc.al{stroke:#f87171}\n.gg .gc{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;line-height:1}\n.gg .gc .v{font-size:26px;font-weight:700;letter-spacing:-.03em}\n.gg .gc .v.hi{color:#4ade80}\n.gg .gc .v.lo{color:#fbbf24}\n.gg .gc .v.al{color:#f87171}\n.gg .gc .u{font-size:10px;color:#94a3b8;margin-top:2px;letter-spacing:.1em;text-transform:uppercase}\n.gg .meta{display:flex;justify-content:center;gap:10px;margin-top:10px;font-size:10px;color:#94a3b8;font-family:monospace}\n.gg .meta .k{color:#6b7280;margin-right:3px}\n.gg .empty{padding:30px;text-align:center;color:#64748b;font-family:sans-serif;grid-column:1/-1}\n</style>\n<div class=\"gg\" ng-if=\"msg.payload && msg.payload.tanks && msg.payload.tanks.length\">\n  <div class=\"cell\"\n       ng-repeat=\"t in msg.payload.tanks track by (t.id || t.name || $index)\"\n       ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high' && t.level_pct>=20 && t.level_pct<=90, al: t.level_pct<20 || t.level_pct>90 }\">\n    <div class=\"nm\">{{t.name || t.id}}</div>\n    <div class=\"gw\">\n      <svg viewBox=\"0 0 120 120\">\n        <circle class=\"track\" cx=\"60\" cy=\"60\" r=\"50\"/>\n        <circle class=\"arc\"\n                ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high' && t.level_pct>=20 && t.level_pct<=90, al: t.level_pct<20 || t.level_pct>90 }\"\n                cx=\"60\" cy=\"60\" r=\"50\"\n                stroke-dasharray=\"{{ (3.1416 * 2 * 50 * (t.level_pct || 0) / 100).toFixed(2) }} 999\"\n                transform=\"rotate(-90 60 60)\"/>\n      </svg>\n      <div class=\"gc\">\n        <div class=\"v\" ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high' && t.level_pct>=20 && t.level_pct<=90, al: t.level_pct<20 || t.level_pct>90 }\">\n          {{t.level_pct | number:1}}\n        </div>\n        <div class=\"u\">% full</div>\n      </div>\n    </div>\n    <div class=\"meta\">\n      <span ng-if=\"t.reading && t.reading.level_ft !== undefined && t.reading.level_ft !== null\"><span class=\"k\">ft</span>{{t.reading.level_ft | number:2}}</span>\n      <span ng-if=\"t.reading && t.reading.volume_bbl !== undefined && t.reading.volume_bbl !== null\"><span class=\"k\">bbl</span>{{t.reading.volume_bbl | number:0}}</span>\n      <span><span class=\"k\">\u00b0C</span>{{t.temp_avg | number:1}}</span>\n    </div>\n  </div>\n</div>\n<div class=\"empty\" ng-if=\"!msg.payload || !msg.payload.tanks || !msg.payload.tanks.length\">\n  waiting for first payload\u2026\n</div>",
+    "storeOutMessages": true,
+    "fwdInMessages": true,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "x": 640,
+    "y": 220,
+    "wires": [[]]
+  },
+
+  {
     "id": "tpl-tank-cards",
     "type": "ui_template",
     "z": "thermal-tab",
@@ -173,7 +287,7 @@
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 640,
-    "y": 180,
+    "y": 280,
     "wires": [[]]
   },
 
@@ -200,7 +314,7 @@
     "removeOlderUnit": "3600",
     "useOldStyle": false,
     "x": 640,
-    "y": 260,
+    "y": 340,
     "wires": [[]]
   },
   {
@@ -225,7 +339,7 @@
     "removeOlderUnit": "3600",
     "useOldStyle": false,
     "x": 640,
-    "y": 320,
+    "y": 400,
     "wires": [[]]
   },
 
@@ -237,7 +351,7 @@
     "func": "// Emit an alert only when level leaves the band AND confidence is high AND state changes.\nconst LOW = 20;\nconst HIGH = 90;\nconst COOLDOWN_MS = 60_000;\n\nconst t = msg._tank || {};\nif (t.confidence !== 'high') return null;\n\nconst id = t.id || msg.topic;\nconst state = t.level_pct < LOW ? 'LOW' : (t.level_pct > HIGH ? 'HIGH' : 'OK');\n\nconst mem = context.get('mem') || {};\nconst prev = mem[id] || { state: 'OK', ts: 0 };\nconst now = Date.now();\n\nconst isOut = state !== 'OK';\nconst transitioned = state !== prev.state;\nconst stale = isOut && (now - prev.ts) > COOLDOWN_MS;\n\nmem[id] = { state, ts: (isOut && (transitioned || stale)) ? now : prev.ts };\ncontext.set('mem', mem);\n\nlet out = null;\nif (!isOut) {\n    if (prev.state !== 'OK') {\n        out = {\n            topic: 'Tank recovered',\n            payload: (t.name || id) + ' back in band (' + t.level_pct.toFixed(1) + '%)',\n            _tank: t,\n            _state: 'OK'\n        };\n    }\n} else if (transitioned || stale) {\n    out = {\n        topic: 'Tank ' + state,\n        payload: (t.name || id) + ' level ' + t.level_pct.toFixed(1) + '% (' + state + ')',\n        _tank: t,\n        _state: state\n    };\n}\n\nif (out) {\n    // Persist into bounded history\n    const hist = flow.get('alerts') || [];\n    hist.push({ ts: now, state: out._state, payload: out.payload, topic: out.topic });\n    if (hist.length > 200) hist.splice(0, hist.length - 200);\n    flow.set('alerts', hist);\n    out.payload_history = hist;\n}\nreturn out;",
     "outputs": 1,
     "x": 370,
-    "y": 400,
+    "y": 460,
     "wires": [["toast-alert", "tpl-alerts", "debug-alert"]]
   },
   {
@@ -256,7 +370,7 @@
     "topic": "",
     "name": "Alert toast",
     "x": 600,
-    "y": 360,
+    "y": 440,
     "wires": []
   },
   {
@@ -273,7 +387,7 @@
     "statusVal": "payload",
     "statusType": "msg",
     "x": 600,
-    "y": 440,
+    "y": 500,
     "wires": []
   },
   {
@@ -291,7 +405,7 @@
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 600,
-    "y": 500,
+    "y": 560,
     "wires": [[]]
   },
 
