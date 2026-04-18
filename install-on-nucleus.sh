@@ -25,7 +25,15 @@ TAG="v0.1.0"
 
 IMG="thermal-analyzer:armv7"
 NAME="thermal-analyzer"
-INSTALL_DIR="/opt/thermal"
+# Pick a writable persistent path. Many Yocto-based Nucleus builds have / read-only
+# and /data (mmcblk2p4) as the r/w partition.
+if [ -w /data ] 2>/dev/null; then
+    INSTALL_DIR="/data/thermal"
+elif [ -w /home/admin ]; then
+    INSTALL_DIR="/home/admin/thermal"
+else
+    INSTALL_DIR="/tmp/thermal"
+fi
 IMG_URL="https://github.com/${GH_USER}/${GH_REPO}/releases/download/${TAG}/thermal-analyzer-armv7.tar.gz"
 CFG_URL="https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/main/thermal/config.yaml"
 
