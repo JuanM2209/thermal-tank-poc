@@ -130,14 +130,12 @@ class WebServer:
             resp = Response(
                 self._mjpeg_gen(),
                 mimetype="multipart/x-mixed-replace; boundary=frame",
-                direct_passthrough=True,
             )
-            # Defeat proxy buffering so CF Tunnel + chisel don't add 5-10s lag.
+            # Soft anti-buffering only — don't override connection handling
+            # or direct_passthrough (Flask auto-sets it for generators).
             resp.headers["X-Accel-Buffering"] = "no"
             resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             resp.headers["Pragma"] = "no-cache"
-            resp.headers["Expires"] = "0"
-            resp.headers["Connection"] = "close"
             return resp
 
         @app.route("/api/state")
@@ -502,9 +500,13 @@ class WebServer:
             if not ok:
                 time.sleep(0.1)
                 continue
+            jpg_bytes = jpg.tobytes()
             yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + jpg.tobytes()
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpg_bytes)).encode() + b"\r\n"
+                b"\r\n"
+                + jpg_bytes
                 + b"\r\n"
             )
             time.sleep(interval)
