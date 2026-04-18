@@ -38,7 +38,7 @@ INDEX_HTML = r"""<!doctype html>
     @keyframes pulse{50%{opacity:.6}}
     .pill{backdrop-filter:blur(6px);background:rgba(15,23,42,.8);border:1px solid #1f2630;border-radius:999px;padding:.25rem .75rem;font-size:.72rem}
     .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
-    .ok{background:#22c55e}.warn{background:#f59e0b}.err{background:#ef4444}.idle{background:#64748b}
+    .dot.ok{background:#22c55e}.dot.warn{background:#f59e0b}.dot.err{background:#ef4444}.dot.idle{background:#64748b}
 
     /* SCADA tank card */
     .tank-card{background:linear-gradient(180deg,#0d1218 0%,#0a0e14 100%);border:1px solid #1f2a38;border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}
