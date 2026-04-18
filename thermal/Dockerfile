@@ -41,10 +41,13 @@ ENV PYTHONUNBUFFERED=1 \
     LANG=C.UTF-8 \
     PATH="/opt/venv/bin:$PATH"
 
-# opencv-python-headless still needs libGL + glib at runtime
+# Runtime shared libs:
+#   libgl1 / libglib2.0-0   -> opencv-python-headless
+#   libopenblas0            -> piwheels numpy is linked against OpenBLAS
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
+        libopenblas0 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
