@@ -41,13 +41,20 @@ ENV PYTHONUNBUFFERED=1 \
     LANG=C.UTF-8 \
     PATH="/opt/venv/bin:$PATH"
 
-# Runtime shared libs:
-#   libgl1 / libglib2.0-0   -> opencv-python-headless
-#   libopenblas0            -> piwheels numpy is linked against OpenBLAS
+# Runtime shared libs (all the piwheels / opencv-headless indirect deps):
+#   libgl1 / libglib2.0-0      -> opencv-python-headless
+#   libjpeg62-turbo            -> opencv imread/imencode JPEG (libjpeg.so.62)
+#   libpng16-16 / libtiff6 / libwebp7  -> opencv image codecs
+#   libopenblas0 / libgomp1    -> piwheels numpy (OpenBLAS + OpenMP)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
+        libjpeg62-turbo \
+        libpng16-16 \
+        libtiff6 \
+        libwebp7 \
         libopenblas0 \
+        libgomp1 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 

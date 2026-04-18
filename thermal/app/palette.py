@@ -54,18 +54,31 @@ PALETTES = ("grayscale", "iron", "rainbow", "hot", "inferno", "plasma",
             "magma", "jet", "turbo", "cividis")
 
 
-def normalize_thermal(thermal_c: np.ndarray) -> tuple[np.ndarray, float, float]:
-    """Contrast-stretch the thermal frame to 0..255 and return min/max used."""
-    tmin = float(thermal_c.min())
-    tmax = float(thermal_c.max())
+def normalize_thermal(thermal_c: np.ndarray,
+                      range_min: float | None = None,
+                      range_max: float | None = None) -> tuple[np.ndarray, float, float]:
+    """Contrast-stretch the thermal frame to 0..255.
+
+    If range_min / range_max are provided, the palette is pinned to that fixed
+    scale (out-of-range pixels are clipped). Otherwise we use the current frame
+    min/max ("auto-stretch", dynamic contrast).
+    """
+    if range_min is not None and range_max is not None and range_max > range_min:
+        tmin = float(range_min)
+        tmax = float(range_max)
+    else:
+        tmin = float(thermal_c.min())
+        tmax = float(thermal_c.max())
     span = max(1e-3, tmax - tmin)
     norm = np.clip((thermal_c - tmin) / span * 255.0, 0, 255).astype(np.uint8)
     return norm, tmin, tmax
 
 
-def render(thermal_c: np.ndarray, palette: str = "iron") -> tuple[np.ndarray, float, float]:
+def render(thermal_c: np.ndarray, palette: str = "iron",
+           range_min: float | None = None,
+           range_max: float | None = None) -> tuple[np.ndarray, float, float]:
     """Return a BGR visualisation of the thermal frame + the (min, max) °C used."""
-    norm, tmin, tmax = normalize_thermal(thermal_c)
+    norm, tmin, tmax = normalize_thermal(thermal_c, range_min, range_max)
     p = (palette or "iron").lower()
     if p == "grayscale":
         bgr = cv2.cvtColor(norm, cv2.COLOR_GRAY2BGR)
@@ -93,3 +106,46 @@ def find_hot_cold(thermal_c: np.ndarray) -> tuple[tuple[int, int, float], tuple[
     hot = (int(max_loc[0]), int(max_loc[1]), float(max_val))
     cold = (int(min_loc[0]), int(min_loc[1]), float(min_val))
     return hot, cold
+
+
+def apply_isotherm(rendered_bgr: np.ndarray, thermal_c: np.ndarray,
+                   t_min: float, t_max: float, color_bgr: tuple[int, int, int]) -> np.ndarray:
+    """Paint pixels in [t_min, t_max] °C with a flat colour (highlight zone)."""
+    if rendered_bgr is None:
+        return rendered_bgr
+    mask = (thermal_c >= t_min) & (thermal_c <= t_max)
+    if not mask.any():
+        return rendered_bgr
+    # rendered_bgr may be upscaled already — ensure we mask at sensor res then resize
+    H, W = thermal_c.shape
+    if rendered_bgr.shape[:2] != (H, W):
+        m_vis = cv2.resize(mask.astype(np.uint8) * 255, (rendered_bgr.shape[1], rendered_bgr.shape[0]),
+                           interpolation=cv2.INTER_NEAREST) > 0
+    else:
+        m_vis = mask
+    out = rendered_bgr.copy()
+    out[m_vis] = color_bgr
+    return out
+
+
+_ROTATE_MAP = {
+    90:  cv2.ROTATE_90_CLOCKWISE,
+    180: cv2.ROTATE_180,
+    270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+    -90: cv2.ROTATE_90_COUNTERCLOCKWISE,
+}
+
+
+def transform(img: np.ndarray, rotate: int = 0, flip_h: bool = False, flip_v: bool = False) -> np.ndarray:
+    """Apply rotation/flips in-place-ish. Returns a new array."""
+    if img is None:
+        return img
+    out = img
+    r = int(rotate or 0) % 360
+    if r and r in _ROTATE_MAP:
+        out = cv2.rotate(out, _ROTATE_MAP[r])
+    if flip_h:
+        out = cv2.flip(out, 1)
+    if flip_v:
+        out = cv2.flip(out, 0)
+    return out

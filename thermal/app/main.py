@@ -26,8 +26,15 @@ from analyzer import TankAnalyzer
 from camera_detect import autodetect
 from capture import ThermalCapture
 from overlay import draw_frame_overlay
-from palette import find_hot_cold, render, blend_with_visual
+from palette import (
+    apply_isotherm,
+    blend_with_visual,
+    find_hot_cold,
+    render,
+    transform,
+)
 from publisher import HttpPublisher
+from recorder import Recorder
 from state import SHARED
 from stream import WebServer
 
@@ -135,10 +142,15 @@ def main():
     def _on_cfg_change():
         reload_flag["v"] += 1
 
+    recorder = Recorder(
+        snapshot_dir=cfg.get("stream", {}).get("snapshot_dir", "/app/data/snapshots"),
+        recording_dir=cfg.get("stream", {}).get("recording_dir", "/app/data/recordings"),
+    )
     server = WebServer(
         config=cfg,
         on_config_change=_on_cfg_change,
         persist_path=RUNTIME_OVERRIDE if os.path.isdir(os.path.dirname(RUNTIME_OVERRIDE)) else None,
+        recorder=recorder,
     )
     if cfg.get("stream", {}).get("enabled", True):
         server.run_threaded(port=cfg["stream"].get("port", 8080))
@@ -160,10 +172,13 @@ def main():
     event_det = EventDetector(min_level_delta=cfg["analysis"].get("level_event_delta", 5.0))
     open("/tmp/alive", "w").close()
 
+    frozen_thermal = None
+    frozen_visual = None
+
     while running["v"]:
         try:
-            visual, thermal = cap.read()
-            if thermal is None:
+            visual_raw, thermal_raw = cap.read()
+            if thermal_raw is None:
                 time.sleep(0.05)
                 continue
             frame_count += 1
@@ -180,19 +195,54 @@ def main():
                 local_reload_seen = reload_flag["v"]
                 log.info(f"Config reloaded v={local_reload_seen}")
 
+            stream_cfg = cfg.get("stream", {})
+
+            # ---- freeze ----
+            if stream_cfg.get("freeze"):
+                if frozen_thermal is None:
+                    frozen_thermal = thermal_raw.copy()
+                    frozen_visual = visual_raw.copy() if visual_raw is not None else None
+                thermal = frozen_thermal
+                visual = frozen_visual
+            else:
+                frozen_thermal = frozen_visual = None
+                thermal = thermal_raw
+                visual = visual_raw
+
+            # ---- rotation + flip (BEFORE analysis so ROIs match the displayed frame) ----
+            rot = int(stream_cfg.get("rotate", 0) or 0)
+            flip_h = bool(stream_cfg.get("flip_h", False))
+            flip_v = bool(stream_cfg.get("flip_v", False))
+            if rot or flip_h or flip_v:
+                thermal = transform(thermal, rot, flip_h, flip_v)
+                if visual is not None:
+                    visual = transform(visual, rot, flip_h, flip_v)
+
             # ---- analyze ----
             results = analyzer.analyze(thermal)
 
-            # ---- palette render ----
-            stream_cfg = cfg.get("stream", {})
+            # ---- palette render (optionally pinned range) ----
             palette_name = stream_cfg.get("palette", "iron")
             source = stream_cfg.get("source", "thermal")
+            rmin = stream_cfg.get("range_min")
+            rmax = stream_cfg.get("range_max")
             if source == "visual" and visual is not None:
                 rendered, tmin, tmax = visual.copy(), float(thermal.min()), float(thermal.max())
             else:
-                rendered, tmin, tmax = render(thermal, palette_name)
+                rendered, tmin, tmax = render(thermal, palette_name, rmin, rmax)
                 if source == "blend" and visual is not None:
                     rendered = blend_with_visual(visual, rendered, alpha=0.55)
+
+            # ---- isotherm highlight ----
+            if stream_cfg.get("isotherm_enabled"):
+                ic = stream_cfg.get("isotherm_color", [255, 255, 255])
+                color = (int(ic[0]), int(ic[1]), int(ic[2]))
+                rendered = apply_isotherm(
+                    rendered, thermal,
+                    float(stream_cfg.get("isotherm_min", 35.0)),
+                    float(stream_cfg.get("isotherm_max", 60.0)),
+                    color,
+                )
 
             hot, cold = find_hot_cold(thermal)
 
@@ -235,6 +285,10 @@ def main():
                 hot=hot, cold=cold,
                 results=results, fps=fps_now, frame_idx=frame_count,
             )
+
+            # ---- video recording ----
+            if recorder.recording:
+                recorder.write(rendered)
 
             if frame_count % 50 == 0:
                 os.utime("/tmp/alive", None)

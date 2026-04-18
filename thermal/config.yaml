@@ -64,6 +64,22 @@ stream:
   source: thermal
   # Palette: grayscale | iron | rainbow | hot | inferno | plasma | jet | magma | turbo | cividis
   palette: iron
+  # Image transforms applied BEFORE overlay/upscale
+  rotate: 0            # 0 | 90 | 180 | 270
+  flip_h: false
+  flip_v: false
+  # Temperature display range. When null, auto-stretch from current min/max.
+  # Set to fixed numbers (e.g. range_min: 15.0, range_max: 45.0) to pin the palette.
+  range_min: null
+  range_max: null
+  # Isotherm highlight: pixels with temp in this window painted with highlight_color.
+  # Set isotherm_enabled: true to activate. color is BGR.
+  isotherm_enabled: false
+  isotherm_min: 35.0
+  isotherm_max: 60.0
+  isotherm_color: [255, 255, 255]
+  # Pause the live frame (still streams but thermal/visual snapshot is frozen)
+  freeze: false
   # Temperature overlays painted on the stream
   overlay:
     roi_boxes: true
@@ -75,6 +91,9 @@ stream:
     temp_scale: true       # colorbar with min/max °C
     fps_counter: true
     tank_labels: true
+  # Video recording destination (inside the container; /app/data is mounted to host)
+  recording_dir: /app/data/recordings
+  snapshot_dir:  /app/data/snapshots
 
 # Web dashboard specifics (served by the Flask app on stream.port)
 ui:
