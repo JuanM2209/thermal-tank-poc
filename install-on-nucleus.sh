@@ -25,14 +25,20 @@ TAG="v0.1.0"
 
 IMG="thermal-analyzer:armv7"
 NAME="thermal-analyzer"
-# Pick a writable persistent path. Many Yocto-based Nucleus builds have / read-only
-# and /data (mmcblk2p4) as the r/w partition.
-if [ -w /data ] 2>/dev/null; then
-    INSTALL_DIR="/data/thermal"
-elif [ -w /home/admin ]; then
-    INSTALL_DIR="/home/admin/thermal"
-else
-    INSTALL_DIR="/tmp/thermal"
+# Pick a writable persistent path by actually trying to create it.
+# [ -w /data ] can return true while mkdir /data/<x> fails for non-root users,
+# because the /data mount root is owned by root. Test for real.
+INSTALL_DIR=""
+for candidate in /home/admin/thermal /data/thermal /data/home/admin/thermal /tmp/thermal; do
+    if mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ] && (touch "$candidate/.writetest" 2>/dev/null); then
+        rm -f "$candidate/.writetest"
+        INSTALL_DIR="$candidate"
+        break
+    fi
+done
+if [ -z "$INSTALL_DIR" ]; then
+    echo "no writable location found among /home/admin, /data, /tmp — aborting"
+    exit 1
 fi
 IMG_URL="https://github.com/${GH_USER}/${GH_REPO}/releases/download/${TAG}/thermal-analyzer-armv7.tar.gz"
 CFG_URL="https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/main/thermal/config.yaml"
@@ -47,7 +53,6 @@ docker info >/dev/null 2>&1 || { echo "docker daemon not reachable"; exit 1; }
 [ -e /dev/video0 ] || { echo "/dev/video0 not present — plug in the camera first"; exit 1; }
 
 say "2/5 Preparing $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 say "3/5 Downloading config.yaml (only if absent)..."
