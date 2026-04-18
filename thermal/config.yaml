@@ -7,6 +7,10 @@
 #   -> 256x384 is the DUAL frame: top 256x192 = visual, bottom 256x192 = thermal raw
 # ============================================================
 
+site:
+  # Identifies this Nucleus in the supervisor dashboard. Override with SITE_ID env.
+  id: N-1065
+
 camera:
   device: /dev/video0
   width: 256
@@ -37,11 +41,19 @@ tanks:
     medium: water
     roi: { x: 30,  y: 10, w: 40, h: 170 }
     min_temp_delta: 1.2
+    geometry:
+      height_ft: 22.0
+      diameter_ft: 12.0
+      shape: vertical_cylinder
   - id: tank_02
     name: "Tank 2"
     medium: oil
     roi: { x: 140, y: 10, w: 40, h: 170 }
     min_temp_delta: 1.0
+    geometry:
+      height_ft: 16.0
+      diameter_ft: 10.0
+      shape: vertical_cylinder
 
 # HTTP POST to Node-RED endpoint (set up in the shipped flow)
 publisher:
@@ -107,3 +119,17 @@ ui:
   reflect_temp_c: 20.0
   # Minimum gradient (°C) required to mark a tank reading as "trusted"
   trust_threshold_c: 1.0
+  # Primary unit the operator console shows for level ("ft" or "in").
+  level_unit: ft
+  # Origins allowed to iframe the :8080 console/stream. CSP frame-ancestors.
+  iframe_origins: "https://*.datadesng.com"
+
+# Latest auto-calibration result (populated by POST /api/calibrate)
+calibration:
+  emissivity: null
+  reflect_temp_c: null
+  range_min_c: null
+  range_max_c: null
+  range_locked: false
+  calibrated_at: null
+  notes: []

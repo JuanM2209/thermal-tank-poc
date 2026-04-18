@@ -1,38 +1,60 @@
-"""HTTP POST publisher — sends tank readings directly to a Node-RED HTTP endpoint.
-No MQTT broker needed — Node-RED already runs on the Nucleus.
+"""HTTP POST publisher -> Node-RED ingest endpoint.
+
+Timestamp is ALWAYS milliseconds since epoch. Downstream code (Node-RED,
+dashboards) should never do unit math.
 """
+
+from __future__ import annotations
 
 import json
 import logging
-import time
 import threading
-import urllib.request
+import time
 import urllib.error
+import urllib.request
 
 log = logging.getLogger("http")
 
+MAX_QUEUE = 500
+WORKER_SLEEP = 0.2
+PAYLOAD_FIELDS = (
+    "id", "name", "medium", "medium_declared", "medium_confidence",
+    "level_pct", "level_pct_raw",
+    "temp_min", "temp_max", "temp_avg",
+    "gradient_peak", "confidence",
+    "geometry", "reading", "roi",
+)
+
 
 class HttpPublisher:
-    def __init__(self, endpoint, timeout=3.0, max_queue=500):
+    def __init__(
+        self,
+        endpoint: str,
+        timeout: float = 3.0,
+        site_id: str = "unknown",
+        max_queue: int = MAX_QUEUE,
+    ):
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
-        self._queue = []
+        self.site_id = site_id
+        self._max_queue = max_queue
+        self._queue: list[dict] = []
         self._lock = threading.Lock()
         self._running = True
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
-        log.info(f"HTTP publisher -> {self.endpoint}")
+        log.info(f"HTTP publisher -> {self.endpoint} (site={site_id})")
 
-    def _worker(self):
+    def _worker(self) -> None:
         while self._running:
             with self._lock:
                 batch = self._queue[:]
                 self._queue.clear()
             for item in batch:
                 self._post(item)
-            time.sleep(0.2)
+            time.sleep(WORKER_SLEEP)
 
-    def _post(self, payload):
+    def _post(self, payload: dict) -> None:
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -48,28 +70,22 @@ class HttpPublisher:
         except Exception as e:
             log.warning(f"POST error: {e}")
 
-    def publish(self, results):
+    def publish(self, results: list[dict], calibration: dict | None = None) -> None:
         now_ms = int(time.time() * 1000)
+        tanks: list[dict] = []
+        for r in results:
+            tank: dict = {k: r.get(k) for k in PAYLOAD_FIELDS if k in r}
+            if calibration:
+                tank["calibration"] = calibration
+            tanks.append(tank)
         payload = {
             "ts": now_ms,
-            "tanks": [
-                {
-                    "id": r["id"],
-                    "name": r["name"],
-                    "medium": r.get("medium", "unknown"),
-                    "level_pct": r["level_pct"],
-                    "temp_min": r["temp_min"],
-                    "temp_max": r["temp_max"],
-                    "temp_avg": r["temp_avg"],
-                    "gradient_peak": r["gradient_peak"],
-                    "confidence": r["confidence"],
-                }
-                for r in results
-            ],
+            "site_id": self.site_id,
+            "tanks": tanks,
         }
         with self._lock:
-            if len(self._queue) < 500:
+            if len(self._queue) < self._max_queue:
                 self._queue.append(payload)
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False

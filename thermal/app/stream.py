@@ -1,17 +1,24 @@
 """MJPEG + JSON API server.
 
-- GET  /                        -> SPA dashboard
-- GET  /stream.mjpg             -> live palette+overlay stream
-- GET  /api/state               -> latest readings
-- GET  /api/temp?x=INT&y=INT    -> temperature at sensor pixel (°C)
-- GET  /api/config              -> merged config
-- PATCH /api/config             -> deep-merge partial update (palette, overlays, fps, ...)
-- GET  /api/tanks               -> current tanks
-- POST /api/tanks               -> add a tank
-- PATCH /api/tanks/<id>         -> update fields (name, medium, roi, min_temp_delta)
-- DELETE /api/tanks/<id>        -> remove
-- GET  /api/events?since=SEQ    -> event log
-- GET  /healthz                 -> ok/503
+Routes
+------
+- GET  /                           SPA
+- GET  /stream.mjpg                live palette+overlay stream (iframe-able)
+- GET  /api/state                  latest readings
+- GET  /api/temp?x=...&y=...       temperature at sensor pixel (C)
+- GET  /api/line?x1=...&y1=...     line profile
+- GET  /api/config                 merged config
+- PATCH /api/config                deep-merge partial update
+- GET  /api/tanks
+- POST /api/tanks                  add a tank
+- PATCH /api/tanks/<id>            update fields
+- DELETE /api/tanks/<id>           remove
+- POST /api/detect                 run OpenCV auto-detect
+- POST /api/detect/accept          persist detected tanks
+- POST /api/calibrate              10 s auto-calibration
+- GET  /api/events?since=SEQ       event log
+- POST /api/snapshot, record/start, record/stop, files, ...
+- GET  /healthz
 """
 
 from __future__ import annotations
@@ -22,20 +29,32 @@ import logging
 import os
 import threading
 import time
+from typing import Callable
 
 import cv2
 import numpy as np
 from flask import Flask, Response, abort, jsonify, request, send_file
 
 import detect as detector
+from calibration import as_config_patch, calibrate
 from state import SHARED
 from webui import INDEX_HTML
 
 log = logging.getLogger("stream")
 
+DEFAULT_IFRAME_ORIGINS = "https://*.datadesng.com"
+CALIBRATION_FRAME_COUNT = 30
+CALIBRATION_MAX_SECONDS = 12.0
+
 
 class WebServer:
-    def __init__(self, config: dict, on_config_change=None, persist_path=None, recorder=None):
+    def __init__(
+        self,
+        config: dict,
+        on_config_change: Callable[[], None] | None = None,
+        persist_path: str | None = None,
+        recorder=None,
+    ):
         self._cfg = config
         self._cfg_lock = threading.Lock()
         self._on_change = on_config_change or (lambda: None)
@@ -43,6 +62,7 @@ class WebServer:
         self._recorder = recorder
         self.app = Flask("thermal")
         self.app.config["JSON_SORT_KEYS"] = False
+        self._install_headers()
         self._setup_routes()
 
     # ---------- Config helpers ----------
@@ -58,7 +78,7 @@ class WebServer:
                 base[k] = v
         return base
 
-    def _persist(self):
+    def _persist(self) -> None:
         if not self._persist_path:
             return
         try:
@@ -67,7 +87,7 @@ class WebServer:
         except Exception as e:
             log.warning(f"persist failed: {e}")
 
-    def apply_patch(self, patch: dict):
+    def apply_patch(self, patch: dict) -> None:
         with self._cfg_lock:
             self._deep_merge(self._cfg, patch)
             self._persist()
@@ -75,8 +95,25 @@ class WebServer:
         SHARED.bump_cfg()
         SHARED.append_event("config_change", keys=list(patch.keys()))
 
+    # ---------- Iframe-friendly headers ----------
+    def _install_headers(self) -> None:
+        app = self.app
+
+        @app.after_request
+        def _headers(response: Response) -> Response:
+            origins = (
+                self.cfg().get("ui", {}).get("iframe_origins")
+                or DEFAULT_IFRAME_ORIGINS
+            )
+            # Remove the Flask default deny and allow embedding from our subdomains.
+            response.headers.pop("X-Frame-Options", None)
+            response.headers["Content-Security-Policy"] = (
+                f"frame-ancestors 'self' {origins}"
+            )
+            return response
+
     # ---------- Routes ----------
-    def _setup_routes(self):
+    def _setup_routes(self) -> None:
         app = self.app
 
         @app.route("/")
@@ -90,8 +127,10 @@ class WebServer:
 
         @app.route("/stream.mjpg")
         def stream():
-            return Response(self._mjpeg_gen(),
-                            mimetype="multipart/x-mixed-replace; boundary=frame")
+            return Response(
+                self._mjpeg_gen(),
+                mimetype="multipart/x-mixed-replace; boundary=frame",
+            )
 
         @app.route("/api/state")
         def api_state():
@@ -100,7 +139,7 @@ class WebServer:
             if s.rendered is not None:
                 h, w = s.rendered.shape[:2]
             return jsonify({
-                "ts": s.ts,
+                "ts": int(s.ts * 1000),   # milliseconds, single source of truth
                 "frame_idx": s.frame_idx,
                 "fps": round(s.fps, 2),
                 "w": w, "h": h,
@@ -111,6 +150,7 @@ class WebServer:
                 "cold": None if s.cold is None else {"x": s.cold[0], "y": s.cold[1], "t": round(s.cold[2], 2)},
                 "results": s.results,
                 "tanks": self.cfg().get("tanks", []),
+                "calibration": self.cfg().get("calibration"),
             })
 
         @app.route("/api/temp")
@@ -125,9 +165,8 @@ class WebServer:
             H, W = s.thermal.shape
             if not (0 <= x < W and 0 <= y < H):
                 return jsonify({"t": None, "err": "out-of-bounds", "w": W, "h": H}), 400
-            # 3x3 neighbourhood median to smooth noise
-            x0, x1 = max(0, x-1), min(W, x+2)
-            y0, y1 = max(0, y-1), min(H, y+2)
+            x0, x1 = max(0, x - 1), min(W, x + 2)
+            y0, y1 = max(0, y - 1), min(H, y + 2)
             patch = s.thermal[y0:y1, x0:x1]
             return jsonify({"t": round(float(np.median(patch)), 2), "x": x, "y": y})
 
@@ -182,24 +221,25 @@ class WebServer:
                 since = 0
             return jsonify(SHARED.events_since(since))
 
-        # ------------------------------------------------------------------
-        # Phase 3: AI auto-detect, line temperature, snapshot/record, files
-        # ------------------------------------------------------------------
+        # ---- auto-detect ----
         @app.route("/api/detect", methods=["POST"])
         def api_detect():
-            """Run OpenCV contour-based tank auto-detection on current frame."""
-            s = SHARED.snapshot()
-            if s.thermal is None:
-                return jsonify({"error": "no-frame"}), 503
             body = request.get_json(silent=True) or {}
             n = int(body.get("max", 4))
-            candidates = detector.detect(s.thermal, max_candidates=n)
+            frames = self._sample_thermal_frames(
+                count=int(body.get("samples", 20)),
+                timeout_s=float(body.get("timeout_s", 6.0)),
+            )
+            if not frames:
+                return jsonify({"error": "no-frame"}), 503
+            candidates = detector.detect(
+                frames[-1], max_candidates=n, frames=frames,
+            )
             SHARED.append_event("auto_detect", count=len(candidates))
-            return jsonify({"candidates": candidates})
+            return jsonify({"candidates": candidates, "frames_used": len(frames)})
 
         @app.route("/api/detect/accept", methods=["POST"])
         def api_detect_accept():
-            """Replace current tanks with the candidates posted in the body."""
             body = request.get_json(silent=True) or {}
             tanks = body.get("tanks") or []
             if not isinstance(tanks, list):
@@ -207,11 +247,45 @@ class WebServer:
             self.apply_patch({"tanks": tanks})
             return jsonify({"ok": True, "count": len(tanks)})
 
+        # ---- auto-calibration ----
+        @app.route("/api/calibrate", methods=["POST"])
+        def api_calibrate():
+            body = request.get_json(silent=True) or {}
+            frames = self._sample_thermal_frames(
+                count=int(body.get("samples", CALIBRATION_FRAME_COUNT)),
+                timeout_s=float(body.get("timeout_s", CALIBRATION_MAX_SECONDS)),
+            )
+            if not frames:
+                return jsonify({"error": "no-frame"}), 503
+            tanks = self.cfg().get("tanks", [])
+            rois = [t["roi"] for t in tanks if "roi" in t]
+            mediums = [t.get("medium", "unknown") for t in tanks]
+            result = calibrate(frames, rois, mediums)
+            self.apply_patch(as_config_patch(result))
+            SHARED.append_event(
+                "calibrated",
+                medium=result.medium_dominant,
+                locked=result.range_locked,
+                delta=result.thermal_delta_c,
+            )
+            return jsonify({
+                "ok": True,
+                "frames_used": len(frames),
+                "calibration": {
+                    "emissivity": result.emissivity,
+                    "reflect_temp_c": result.reflect_temp_c,
+                    "range_min_c": result.range_min_c,
+                    "range_max_c": result.range_max_c,
+                    "range_locked": result.range_locked,
+                    "calibrated_at": result.calibrated_at,
+                    "notes": result.notes,
+                    "medium_dominant": result.medium_dominant,
+                    "thermal_delta_c": result.thermal_delta_c,
+                },
+            })
+
         @app.route("/api/line")
         def api_line():
-            """Temperature profile along an arbitrary line in sensor coords.
-            Query: x1,y1,x2,y2 (ints). Returns samples + min/avg/max.
-            """
             try:
                 x1 = int(request.args["x1"]); y1 = int(request.args["y1"])
                 x2 = int(request.args["x2"]); y2 = int(request.args["y2"])
@@ -269,8 +343,12 @@ class WebServer:
                 return jsonify({"err": "recorder-disabled"}), 503
             res = self._recorder.stop()
             if res.get("ok"):
-                SHARED.append_event("record_stop", file=res.get("name"),
-                                    frames=res.get("frames"), seconds=res.get("seconds"))
+                SHARED.append_event(
+                    "record_stop",
+                    file=res.get("name"),
+                    frames=res.get("frames"),
+                    seconds=res.get("seconds"),
+                )
             return jsonify(res)
 
         @app.route("/api/record/status")
@@ -279,7 +357,6 @@ class WebServer:
                 return jsonify({"recording": False, "err": "recorder-disabled"})
             return jsonify(self._recorder.status())
 
-        # ---- files (list + download) ----
         @app.route("/api/files")
         def api_files():
             if self._recorder is None:
@@ -296,13 +373,30 @@ class WebServer:
             }.get(kind)
             if base is None:
                 abort(404)
-            # prevent path traversal
             full = os.path.abspath(os.path.join(base, name))
             if not full.startswith(os.path.abspath(base)):
                 abort(403)
             if not os.path.isfile(full):
                 abort(404)
             return send_file(full, as_attachment=True)
+
+    # ---------- helpers ----------
+    def _sample_thermal_frames(
+        self, count: int = 20, timeout_s: float = 6.0
+    ) -> list[np.ndarray]:
+        """Pull `count` distinct thermal frames (by frame_idx), within `timeout_s`."""
+        frames: list[np.ndarray] = []
+        seen_idx = -1
+        deadline = time.time() + timeout_s
+        while len(frames) < count and time.time() < deadline:
+            snap = SHARED.snapshot()
+            if snap.thermal is None or snap.frame_idx == seen_idx:
+                time.sleep(0.05)
+                continue
+            frames.append(snap.thermal.copy())
+            seen_idx = snap.frame_idx
+            time.sleep(0.05)
+        return frames
 
     # ---------- MJPEG generator ----------
     def _mjpeg_gen(self):
@@ -321,14 +415,18 @@ class WebServer:
             if not ok:
                 time.sleep(0.1)
                 continue
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                   + jpg.tobytes() + b"\r\n")
+            yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                + jpg.tobytes()
+                + b"\r\n"
+            )
             time.sleep(interval)
 
-    def run_threaded(self, port: int):
+    def run_threaded(self, port: int) -> None:
         t = threading.Thread(
-            target=lambda: self.app.run(host="0.0.0.0", port=port,
-                                        threaded=True, use_reloader=False),
+            target=lambda: self.app.run(
+                host="0.0.0.0", port=port, threaded=True, use_reloader=False
+            ),
             daemon=True,
         )
         t.start()

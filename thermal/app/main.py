@@ -130,7 +130,12 @@ def main():
     # ------ publisher (HTTP -> Node-RED) ------
     pub_cfg = cfg.get("publisher", {})
     endpoint = os.environ.get("PUBLISH_ENDPOINT", pub_cfg.get("endpoint"))
-    publisher = HttpPublisher(endpoint, timeout=pub_cfg.get("timeout", 3.0)) if endpoint else None
+    site_id = os.environ.get("SITE_ID") or cfg.get("site", {}).get("id") or "unknown"
+    publisher = (
+        HttpPublisher(endpoint, timeout=pub_cfg.get("timeout", 3.0), site_id=site_id)
+        if endpoint
+        else None
+    )
     if not publisher:
         log.warning("No publisher.endpoint configured — running stream-only")
 
@@ -269,9 +274,13 @@ def main():
             now = time.time()
             only_hi = cfg.get("analysis", {}).get("publish_only_high_confidence", False)
             if results and (now - last_publish) >= interval:
-                pub_results = [r for r in results if r["confidence"] == "high"] if only_hi else results
+                pub_results = (
+                    [r for r in results if r["confidence"] == "high"]
+                    if only_hi
+                    else results
+                )
                 if publisher and pub_results:
-                    publisher.publish(pub_results)
+                    publisher.publish(pub_results, calibration=cfg.get("calibration"))
                 last_publish = now
 
             # ---- events ----

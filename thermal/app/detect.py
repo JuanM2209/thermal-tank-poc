@@ -1,22 +1,25 @@
-"""Auto tank detection with classical OpenCV.
+"""Auto tank detection with classical OpenCV + medium classification.
 
 No training data needed. Works well when tanks are vertical rectangles
 thermally distinct from the background (warmer OR colder).
 
-Pipeline:
-  1. Contrast-stretch the thermal frame.
-  2. Otsu threshold + inverted Otsu threshold (cover both warm & cold tanks).
-  3. Morphological close to fill gaps (vertical kernel — tanks are tall).
-  4. findContours + boundingRect.
-  5. Keep rectangles that:
-       - aspect ratio h/w in [1.5, 8]
-       - min height  >= 25% of frame height
-       - min width   >= 8% of frame width
-       - no overlap > 0.5 IoU with a keeper
-  6. Rank by thermal contrast inside the box vs. outside.
-  7. Return up to N candidates.
+Pipeline
+--------
+1. (Optional) Median-reduce multiple frames to a single stable thermal frame.
+2. Contrast-stretch the thermal frame.
+3. Otsu + inverted Otsu masks (OR'd) to catch hot and cold tanks.
+4. Vertical morphological close to fuse thin gaps.
+5. findContours + boundingRect.
+6. Keep rectangles that satisfy:
+      aspect h/w in [1.5, 8]
+      height >= 25 % of frame height
+      width in [8 %, 55 %] of frame width
+      no IoU overlap > 0.45 with a keeper
+7. Rank by thermal contrast and interface-gradient score.
+8. Classify each keeper as water | oil | unknown via `classifier.py`.
+9. Number candidates left-to-right -> Tank 1, Tank 2, ...
 
-Returns shape: list of {id, roi:{x,y,w,h}, score, hint}.
+Returns list[{id, name, medium, medium_confidence, roi, score, hint, features}].
 """
 
 from __future__ import annotations
@@ -24,12 +27,14 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-_MIN_ASPECT = 1.5    # h/w
+from classifier import MediumClassifier
+
+_MIN_ASPECT = 1.5
 _MAX_ASPECT = 8.0
-_MIN_H_FRAC = 0.25   # relative to frame height
-_MIN_W_FRAC = 0.08   # relative to frame width
-_MAX_W_FRAC = 0.55   # rule out "whole frame is bright"
-_IOU_LIMIT  = 0.45
+_MIN_H_FRAC = 0.25
+_MIN_W_FRAC = 0.08
+_MAX_W_FRAC = 0.55
+_IOU_LIMIT = 0.45
 
 
 def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
@@ -47,37 +52,46 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
 
 
 def _contrast_score(thermal: np.ndarray, x: int, y: int, w: int, h: int) -> float:
-    """Mean |temp inside ROI - temp outside ROI|, normalised."""
     H, W = thermal.shape
     inside = thermal[y:y + h, x:x + w]
     if inside.size == 0:
         return 0.0
-    # Outside = an expanded box minus the ROI
     pad = 8
     ox0, oy0 = max(0, x - pad), max(0, y - pad)
     ox1, oy1 = min(W, x + w + pad), min(H, y + h + pad)
-    outside = thermal[oy0:oy1, ox0:ox1].copy()
+    outside = thermal[oy0:oy1, ox0:ox1].copy().astype(np.float32)
     outside[max(0, y - oy0):max(0, y - oy0) + h,
             max(0, x - ox0):max(0, x - ox0) + w] = np.nan
-    omean = np.nanmean(outside)
+    omean = float(np.nanmean(outside))
     imean = float(np.mean(inside))
     span = float(thermal.max() - thermal.min()) or 1.0
     return abs(imean - omean) / span
 
 
-def detect(thermal: np.ndarray, max_candidates: int = 4) -> list[dict]:
-    """Return up to `max_candidates` ROI boxes (sensor coords)."""
+def _stable_thermal(frames: list[np.ndarray] | None, fallback: np.ndarray) -> np.ndarray:
+    if not frames:
+        return fallback
+    stack = np.stack([f.astype(np.float32) for f in frames], axis=0)
+    return np.median(stack, axis=0)
+
+
+def detect(
+    thermal: np.ndarray,
+    max_candidates: int = 4,
+    frames: list[np.ndarray] | None = None,
+) -> list[dict]:
+    """Return up to `max_candidates` ROI boxes with medium classification."""
     if thermal is None or thermal.size == 0:
         return []
-    H, W = thermal.shape[:2]
-    norm = cv2.normalize(thermal, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # Otsu + inverted Otsu — combined via OR to catch both hot and cold tanks
+    stable = _stable_thermal(frames, thermal)
+    H, W = stable.shape[:2]
+    norm = cv2.normalize(stable, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
     _, mask_hot = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     _, mask_cold = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     mask = cv2.bitwise_or(mask_hot, mask_cold)
 
-    # Vertical-biased close to fuse thin gaps between scanlines
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 9))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
@@ -92,19 +106,15 @@ def detect(thermal: np.ndarray, max_candidates: int = 4) -> list[dict]:
             continue
         if h < _MIN_H_FRAC * H or w < _MIN_W_FRAC * W or w > _MAX_W_FRAC * W:
             continue
-        # Per-box thermal contrast + mean gradient magnitude (how "wall-like")
-        score = _contrast_score(thermal, x, y, w, h)
-        # boost score if there is a strong |dT/dy| inside (interface candidate)
-        strip = thermal[y:y + h, x:x + w]
+        score = _contrast_score(stable, x, y, w, h)
+        strip = stable[y:y + h, x:x + w]
         if strip.shape[0] >= 5:
             prof = strip.mean(axis=1)
             grad = np.abs(np.convolve(prof, [-1, 0, 1], mode="same"))
-            score += 0.5 * float(grad.max()) / max(1e-3, thermal.max() - thermal.min())
-        # Label which pool (warm vs cold)
-        hint = "warm" if thermal[y:y + h, x:x + w].mean() > thermal.mean() else "cold"
+            score += 0.5 * float(grad.max()) / max(1e-3, stable.max() - stable.min())
+        hint = "warm" if stable[y:y + h, x:x + w].mean() > stable.mean() else "cold"
         boxes.append((x, y, w, h, score, hint))
 
-    # Sort by score descending, apply NMS by IoU
     boxes.sort(key=lambda b: b[4], reverse=True)
     keepers: list[tuple[int, int, int, int, float, str]] = []
     for b in boxes:
@@ -114,15 +124,27 @@ def detect(thermal: np.ndarray, max_candidates: int = 4) -> list[dict]:
         if len(keepers) >= max_candidates:
             break
 
-    out = []
+    # Left-to-right numbering so "Tank 1" is always the leftmost in frame.
+    keepers.sort(key=lambda b: b[0])
+
+    classifier = MediumClassifier()
+    out: list[dict] = []
     for i, (x, y, w, h, s, hint) in enumerate(keepers, start=1):
+        tank_id = f"tank_{i:02d}"
+        roi = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+        classification = classifier.classify(tank_id, stable, roi)
+        medium = classification.medium
+        if medium == "unknown":
+            medium = "water" if hint == "cold" else "oil"
         out.append({
-            "id": f"auto_{i:02d}",
-            "name": f"Auto {i}",
-            "medium": "water" if hint == "cold" else "oil",
-            "roi": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
+            "id": tank_id,
+            "name": f"Tank {i}",
+            "medium": medium,
+            "medium_confidence": classification.confidence or (0.5 if hint else 0.0),
+            "roi": roi,
             "score": round(float(s), 3),
             "hint": hint,
             "min_temp_delta": 0.8,
+            "features": classification.features,
         })
     return out

@@ -1,6 +1,8 @@
-"""Single-file HTML for the dashboard (Alpine.js + Tailwind via CDN).
+"""Operator Console — single-page Alpine.js SPA for :8080.
 
-Keeping this as a Python string lets us ship one file, no build step.
+Rendered as one HTML string so the container ships one file with no build step.
+Tailwind + Alpine come from CDNs; first load may stall on air-gapped sites but
+that's intentional for the PoC.
 """
 
 INDEX_HTML = r"""<!doctype html>
@@ -12,646 +14,481 @@ INDEX_HTML = r"""<!doctype html>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <style>
-    html,body{height:100%;background:#0b0d10;color:#e6e6e6;font-family:ui-sans-serif,system-ui,sans-serif}
+    html,body{height:100%;background:#05070a;color:#e6e6e6;font-family:ui-sans-serif,system-ui,sans-serif;overflow:hidden}
     ::-webkit-scrollbar{width:8px;height:8px}
-    ::-webkit-scrollbar-thumb{background:#333;border-radius:4px}
-    .stream-wrap img{image-rendering:pixelated}
-    .pill{backdrop-filter:blur(6px);background:rgba(0,0,0,.55)}
-    .dot{width:6px;height:6px;border-radius:999px;display:inline-block}
-    .ok{background:#22c55e}.warn{background:#f59e0b}.err{background:#ef4444}
-    .card{background:#12161c;border:1px solid #1f2630;border-radius:10px}
-    .btn{background:#1f2630;border:1px solid #2a323d;padding:.35rem .6rem;border-radius:6px;font-size:.78rem;cursor:pointer;color:#e6e6e6}
-    .btn:hover{background:#2a323d}
-    .btn.active{background:#2563eb;border-color:#2563eb}
-    .btn.red{background:#7f1d1d;border-color:#991b1b}
-    .btn.red:hover{background:#991b1b}
-    .btn.rec{background:#dc2626;border-color:#ef4444;animation:pulse 1.3s infinite}
+    ::-webkit-scrollbar-thumb{background:#2a323d;border-radius:4px}
+    .stream-wrap img{image-rendering:pixelated;width:100%;height:100%;object-fit:contain;background:#000}
+    .card{background:#0d1117;border:1px solid #1f2630;border-radius:12px}
+    .card.hi{border-color:#15803d}
+    .card.lo{border-color:#a16207}
+    .card.al{border-color:#b91c1c;box-shadow:inset 0 0 0 1px #b91c1c}
+    .btn{background:#12161c;border:1px solid #2a323d;padding:.4rem .75rem;border-radius:8px;font-size:.8rem;cursor:pointer;color:#e6e6e6;transition:.15s}
+    .btn:hover{background:#1a2030;border-color:#3b4250}
+    .btn.primary{background:#1d4ed8;border-color:#2563eb}
+    .btn.primary:hover{background:#2563eb}
+    .btn.success{background:#166534;border-color:#15803d}
+    .btn.success:hover{background:#15803d}
+    .btn.warn{background:#b45309;border-color:#c2760b}
+    .btn.warn:hover{background:#c2760b}
+    .btn.rec{background:#b91c1c;border-color:#dc2626;animation:pulse 1.3s infinite}
     @keyframes pulse{50%{opacity:.6}}
-    .muted{color:#8a94a3}
-    .grid-bg{background-image:linear-gradient(#11161d 1px,transparent 1px),linear-gradient(90deg,#11161d 1px,transparent 1px);background-size:20px 20px}
-    .shimmer{background:linear-gradient(90deg,#121821 0,#1a222d 50%,#121821 100%);background-size:200% 100%;animation:sh 1.6s linear infinite}
-    @keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
-    .seg{display:inline-flex;border:1px solid #2a323d;border-radius:6px;overflow:hidden}
-    .seg button{padding:.3rem .55rem;font-size:.72rem;background:#1a1f27;color:#e6e6e6;border:none;cursor:pointer}
-    .seg button.active{background:#2563eb}
-    input[type=range]{accent-color:#2563eb}
+    .pill{backdrop-filter:blur(6px);background:rgba(15,23,42,.8);border:1px solid #1f2630;border-radius:999px;padding:.25rem .75rem;font-size:.72rem}
+    .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+    .ok{background:#22c55e}.warn{background:#f59e0b}.err{background:#ef4444}.idle{background:#64748b}
+    .tier1{font-size:2.25rem;font-weight:800;letter-spacing:-.02em;line-height:1}
+    .tier1.hi{color:#4ade80}.tier1.lo{color:#fbbf24}.tier1.al{color:#f87171}
+    .tier2{font-size:.8rem;color:#94a3b8}
+    .chip{display:inline-block;padding:.1rem .45rem;border-radius:999px;font-size:.65rem;border:1px solid #334155;color:#cbd5e1;background:#0f172a}
+    .chip.water{border-color:#0891b2;color:#67e8f9;background:#083344}
+    .chip.oil{border-color:#b45309;color:#fbbf24;background:#78350f}
+    .chip.unknown{border-color:#6b7280;color:#cbd5e1;background:#0f172a}
+    .bar{height:12px;border-radius:999px;background:#0f172a;overflow:hidden;position:relative}
+    .bar .fill{position:absolute;inset:0;right:auto;background:linear-gradient(90deg,#16a34a,#84cc16);transition:width .4s}
+    .bar .fill.al{background:linear-gradient(90deg,#dc2626,#f97316)}
+    .bar .fill.lo{background:linear-gradient(90deg,#a16207,#f59e0b)}
+    .seg{display:inline-flex;border:1px solid #2a323d;border-radius:8px;overflow:hidden}
+    .seg button{padding:.3rem .6rem;font-size:.72rem;background:#12161c;color:#e6e6e6;border:none;cursor:pointer}
+    .seg button.active{background:#2563eb;color:#fff}
+    .grid-bg{background-image:radial-gradient(#11161d 1px,transparent 1px);background-size:22px 22px}
+    .k{font-family:ui-monospace,SFMono-Regular,monospace}
+    .banner{background:linear-gradient(90deg,#581c87,#1e3a8a);border:1px solid #3730a3;border-radius:10px;padding:.5rem .75rem}
+    .modal-bg{background:rgba(5,7,10,.7);backdrop-filter:blur(3px)}
+    details summary{cursor:pointer;list-style:none}
+    details summary::-webkit-details-marker{display:none}
+    .arrow-up{color:#4ade80}.arrow-dn{color:#fbbf24}.arrow-zero{color:#64748b}
   </style>
 </head>
 <body class="h-full grid-bg">
-<div x-data="app()" x-init="boot()" class="h-full flex flex-col">
+<div x-data="app()" x-init="boot()" x-cloak class="h-full flex flex-col">
 
-  <!-- Top bar -->
-  <header class="flex items-center justify-between px-4 py-2 border-b border-[#1f2630] bg-[#0d1117]/80 backdrop-blur">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-md bg-gradient-to-br from-orange-500 to-rose-600 flex items-center justify-center font-bold">T</div>
-      <div>
-        <div class="text-sm font-semibold" x-text="config?.ui?.title || 'Thermal Tank Monitor'"></div>
-        <div class="text-[11px] muted">device <span x-text="deviceId"></span> &middot; <span x-text="fpsLabel"></span></div>
+<!-- Top bar -->
+<header class="flex items-center justify-between px-4 py-3 border-b border-[#1f2630] bg-[#07090d]/90 backdrop-blur">
+  <div class="flex items-center gap-3">
+    <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 via-rose-500 to-indigo-500 flex items-center justify-center font-bold">T</div>
+    <div>
+      <div class="text-sm font-semibold tracking-wide" x-text="config?.ui?.title || 'Thermal Tank Monitor'"></div>
+      <div class="text-[11px] text-slate-400">
+        <span class="k" x-text="siteId"></span>
+        &middot; <span class="k" x-text="deviceHost"></span>
+        &middot; <span x-text="fpsLabel"></span>
       </div>
     </div>
-    <div class="flex items-center gap-2 flex-wrap">
-      <div class="pill rounded-full px-3 py-1 text-xs flex items-center gap-2">
-        <span class="dot" :class="live?'ok':'err'"></span>
-        <span x-text="live ? 'live' : 'offline'"></span>
-      </div>
-      <button class="btn" :class="config?.stream?.freeze?'active':''" @click="patch({stream:{freeze:!config.stream.freeze}})" title="Freeze the live frame">❄ Freeze</button>
-      <button class="btn" @click="snapshot()" title="Save a PNG of the current frame">📸 Snap</button>
-      <button class="btn" :class="recording.recording?'rec':''"
-              @click="toggleRecord()"
-              x-text="recording.recording ? ('⏹ '+fmtDur(recording.seconds)) : '● Record'"></button>
-      <button class="btn" @click="autoDetect()" title="AI auto-detect tanks">✨ Auto-detect</button>
-      <div class="w-px h-6 bg-[#1f2630]"></div>
-      <button class="btn" @click="panel='tanks'"     :class="panel==='tanks'?'active':''">Tanks</button>
-      <button class="btn" @click="panel='palette'"   :class="panel==='palette'?'active':''">Palette</button>
-      <button class="btn" @click="panel='image'"     :class="panel==='image'?'active':''">Image</button>
-      <button class="btn" @click="panel='overlays'"  :class="panel==='overlays'?'active':''">Overlays</button>
-      <button class="btn" @click="panel='settings'"  :class="panel==='settings'?'active':''">Settings</button>
-      <button class="btn" @click="panel='files'"     :class="panel==='files'?'active':''">Files</button>
-      <button class="btn" @click="panel='events'"    :class="panel==='events'?'active':''">Events</button>
+  </div>
+  <div class="flex items-center gap-2 flex-wrap">
+    <span class="pill flex items-center gap-2"><span class="dot" :class="live?'ok':'err'"></span><span x-text="live?'live':'offline'"></span></span>
+    <span class="pill flex items-center gap-2" x-show="config?.calibration?.range_locked">
+      <span class="dot ok"></span>calibrated
+      <span class="text-slate-400 k" x-text="'+/-'+(config?.ui?.emissivity||'-')+' e'"></span>
+    </span>
+    <span class="pill flex items-center gap-2" x-show="!config?.calibration?.range_locked">
+      <span class="dot warn"></span>uncalibrated
+    </span>
+    <div class="seg" role="tablist">
+      <button :class="unit==='ft'?'active':''" @click="setUnit('ft')">ft</button>
+      <button :class="unit==='in'?'active':''" @click="setUnit('in')">in</button>
     </div>
-  </header>
+    <button class="btn primary" @click="openDetectModal()">Auto-detect</button>
+    <button class="btn success" @click="runCalibrate()" :disabled="calibrating" x-text="calibrating?'Calibrating...':'Calibrate'"></button>
+    <button class="btn" @click="snapshot()">Snapshot</button>
+    <button class="btn" :class="recording.recording?'rec':''" @click="toggleRecord()" x-text="recording.recording ? 'Stop Rec' : 'Record'"></button>
+    <button class="btn" @click="panel = panel==='settings'?null:'settings'" :class="panel==='settings'?'primary':''">Settings</button>
+  </div>
+</header>
 
-  <!-- Main split -->
-  <main class="flex-1 grid grid-cols-[280px_1fr_340px] gap-3 p-3 min-h-0">
+<!-- Calibration banner -->
+<div class="px-4 pt-2" x-show="banner" x-transition>
+  <div class="banner text-xs flex items-center gap-2">
+    <span>i</span>
+    <span x-text="banner"></span>
+    <button class="btn ml-auto" @click="banner=null">dismiss</button>
+  </div>
+</div>
 
-    <!-- LEFT: tank cards -->
-    <aside class="card p-3 overflow-y-auto min-h-0">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-sm font-semibold">Tanks</h2>
-        <button class="btn" @click="toolMode='draw_roi'" :class="toolMode==='draw_roi'?'active':''">+ Draw</button>
+<!-- Main 3-pane layout -->
+<main class="flex-1 grid grid-cols-[1fr_420px] gap-3 p-3 min-h-0">
+
+  <!-- LEFT: stream + scale -->
+  <section class="card overflow-hidden relative flex flex-col">
+    <div class="flex items-center justify-between px-3 py-2 border-b border-[#1f2630] text-xs">
+      <div class="flex items-center gap-2">
+        <span class="font-semibold">LIVE</span>
+        <span class="text-slate-400 k" x-text="'frame '+state.frame_idx"></span>
+        <span class="text-slate-400 k" x-text="'sensor '+state.w+'x'+state.h+' (' + (state.upscale||1) + 'x)'"></span>
+        <span class="text-slate-400 k" x-text="'min '+fmt(state.tmin,1)+' / max '+fmt(state.tmax,1)+' C'"></span>
       </div>
-
-      <template x-if="detectionCandidates.length">
-        <div class="card p-2 mb-2 border-emerald-700">
-          <div class="text-xs muted mb-1">AI found <span x-text="detectionCandidates.length"></span> candidate(s)</div>
-          <template x-for="c in detectionCandidates" :key="c.id">
-            <div class="text-[11px] font-mono py-0.5">
-              <span class="text-emerald-400" x-text="c.id"></span>
-              <span class="muted" x-text="` ${c.hint} score=${c.score}`"></span>
-              <span class="muted" x-text="` roi=${c.roi.x},${c.roi.y} ${c.roi.w}×${c.roi.h}`"></span>
-            </div>
+      <div class="flex items-center gap-1">
+        <div class="seg">
+          <template x-for="p in ['iron','rainbow','hot','inferno','plasma','magma','jet','turbo','cividis','grayscale']" :key="p">
+            <button @click="patch({stream:{palette:p}})" :class="config?.stream?.palette===p?'active':''" x-text="p"></button>
           </template>
+        </div>
+        <div class="seg ml-2">
+          <button :class="config?.stream?.source==='thermal'?'active':''" @click="patch({stream:{source:'thermal'}})">thermal</button>
+          <button :class="config?.stream?.source==='visual'?'active':''"  @click="patch({stream:{source:'visual'}})">visual</button>
+          <button :class="config?.stream?.source==='blend'?'active':''"   @click="patch({stream:{source:'blend'}})">blend</button>
+        </div>
+      </div>
+    </div>
+    <div class="stream-wrap flex-1 min-h-0 bg-black relative">
+      <img :src="streamUrl" alt="thermal stream"/>
+      <!-- Detected-candidate overlay -->
+      <div x-show="detect.show" class="absolute inset-0 pointer-events-none" x-transition>
+        <template x-for="c in detect.candidates" :key="c.id">
+          <div class="absolute border-2 border-emerald-400/80"
+               :style="candidateStyle(c)">
+            <div class="absolute -top-6 left-0 text-[11px] bg-emerald-600/90 px-1 rounded k" x-text="c.name + ' . ' + c.medium + ' (' + Math.round(c.medium_confidence*100) + '%)'"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: tank cards + settings panel -->
+  <aside class="flex flex-col gap-3 min-h-0 overflow-y-auto">
+    <template x-for="t in state.results" :key="t.id">
+      <div class="card p-4" :class="cardClass(t)">
+        <div class="flex items-center justify-between mb-1">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold" x-text="t.name"></span>
+            <span class="chip" :class="t.medium" x-text="t.medium"></span>
+            <span class="text-[10px] text-slate-500 k" x-text="'~' + Math.round((t.medium_confidence||0)*100) + '%'"></span>
+          </div>
+          <span class="text-[10px] k" :class="t.confidence==='high'?'text-emerald-400':'text-amber-400'" x-text="t.confidence"></span>
+        </div>
+        <div class="flex items-end justify-between mb-2">
+          <div class="tier1" :class="valueTint(t)" x-text="primaryLabel(t)"></div>
+          <div class="text-right">
+            <div class="tier2 k" x-text="secondaryLabel(t)"></div>
+            <div class="tier2 k" x-text="thirdLabel(t)"></div>
+          </div>
+        </div>
+        <div class="bar mb-2"><div class="fill" :class="valueTint(t)" :style="'width:'+Math.max(0,Math.min(100,t.level_pct))+'%'"></div></div>
+        <div class="grid grid-cols-3 gap-2 text-[11px] text-slate-300">
+          <div class="bg-black/30 rounded p-1">
+            <div class="text-slate-500">min / avg / max</div>
+            <div class="k" x-text="fmt(t.temp_min,1)+' / '+fmt(t.temp_avg,1)+' / '+fmt(t.temp_max,1)+' C'"></div>
+          </div>
+          <div class="bg-black/30 rounded p-1">
+            <div class="text-slate-500">fill rate</div>
+            <div class="k" x-text="rateLabel(t)"></div>
+          </div>
+          <div class="bg-black/30 rounded p-1">
+            <div class="text-slate-500">eta</div>
+            <div class="k" x-text="etaLabel(t)"></div>
+          </div>
+        </div>
+        <details class="mt-2 text-[11px] text-slate-400">
+          <summary class="hover:text-slate-200">geometry & ROI</summary>
+          <div class="k mt-1 leading-5" x-show="t.geometry">
+            <div>height <span x-text="t.geometry?.height_ft"></span> ft . D <span x-text="t.geometry?.diameter_ft"></span> ft . <span x-text="t.geometry?.shape"></span></div>
+            <div x-show="t.reading">full <span x-text="fmt(t.reading?.volume_full_bbl,0)"></span> bbl . ullage <span x-text="fmt(t.reading?.ullage_ft,1)"></span> ft</div>
+          </div>
+          <div class="k mt-1" x-text="'roi x=' + t.roi?.x + ' y=' + t.roi?.y + ' w=' + t.roi?.w + ' h=' + t.roi?.h"></div>
           <div class="flex gap-1 mt-2">
-            <button class="btn flex-1" @click="acceptDetection()">Accept all</button>
-            <button class="btn" @click="detectionCandidates=[]">Dismiss</button>
+            <button class="btn" @click="editTank(t)">Edit</button>
+            <button class="btn" @click="removeTank(t.id)">Remove</button>
           </div>
-        </div>
-      </template>
-
-      <template x-for="t in tanks" :key="t.id">
-        <div class="card p-3 mb-2" :class="resultsById[t.id]?.confidence==='high'?'':'opacity-70'">
-          <div class="flex items-center justify-between">
-            <div class="font-semibold text-sm" x-text="t.name || t.id"></div>
-            <button class="text-xs muted hover:text-red-400" @click="removeTank(t.id)">remove</button>
-          </div>
-          <div class="text-[11px] muted mb-2" x-text="t.medium || 'medium'"></div>
-          <div class="flex items-end gap-2">
-            <div class="text-3xl font-bold tabular-nums"
-                 x-text="(resultsById[t.id]?.level_pct ?? '—') + (resultsById[t.id] ? '%' : '')"
-                 :class="resultsById[t.id]?.confidence==='high'?'text-emerald-400':'text-amber-400'"></div>
-            <div class="text-[11px] muted pb-1">
-              <span class="dot" :class="resultsById[t.id]?.confidence==='high'?'ok':'warn'"></span>
-              <span x-text="resultsById[t.id]?.confidence || '—'"></span>
-            </div>
-          </div>
-          <div class="grid grid-cols-3 gap-2 mt-2 text-[11px]">
-            <div><div class="muted">min</div><div class="tabular-nums" x-text="fmtT(resultsById[t.id]?.temp_min)"></div></div>
-            <div><div class="muted">avg</div><div class="tabular-nums" x-text="fmtT(resultsById[t.id]?.temp_avg)"></div></div>
-            <div><div class="muted">max</div><div class="tabular-nums" x-text="fmtT(resultsById[t.id]?.temp_max)"></div></div>
-          </div>
-        </div>
-      </template>
-      <template x-if="!tanks.length && !detectionCandidates.length">
-        <div class="text-xs muted">No tanks yet — click <b>✨ Auto-detect</b> or <b>+ Draw</b>.</div>
-      </template>
-    </aside>
-
-    <!-- CENTER: live stream -->
-    <section class="card flex flex-col min-h-0">
-      <div class="flex items-center justify-between px-3 py-2 border-b border-[#1f2630]">
-        <div class="flex items-center gap-2 text-xs muted">
-          <span x-text="frameInfo"></span>
-          <template x-if="lastLine">
-            <span class="text-sky-300 font-mono">| line: min <span x-text="fmtT(lastLine.min)"></span>
-              avg <span x-text="fmtT(lastLine.avg)"></span>
-              max <span x-text="fmtT(lastLine.max)"></span>
-              (<span x-text="lastLine.length_px"></span>px)</span>
-          </template>
-        </div>
-        <div class="flex items-center gap-2">
-          <button class="btn" :class="toolMode==='pan'?'active':''"      @click="toolMode='pan'">Pan</button>
-          <button class="btn" :class="toolMode==='probe'?'active':''"    @click="toolMode='probe'">Probe °</button>
-          <button class="btn" :class="toolMode==='marker'?'active':''"   @click="toolMode='marker'">Pin</button>
-          <button class="btn" :class="toolMode==='line'?'active':''"     @click="toolMode='line'">Line</button>
-          <button class="btn" :class="toolMode==='draw_roi'?'active':''" @click="toolMode='draw_roi'">ROI</button>
-          <button class="btn" @click="markers=[]; lines=[]; lastLine=null">Clear</button>
-        </div>
+        </details>
       </div>
-
-      <div class="flex-1 relative stream-wrap overflow-hidden"
-           @mousemove="onMove($event)" @mouseleave="hover=null"
-           @mousedown="onDown($event)" @mouseup="onUp($event)">
-        <img id="mjpeg" src="/stream.mjpg" class="w-full h-full object-contain select-none pointer-events-none" draggable="false"/>
-
-        <!-- Overlay layer for markers, lines, draw preview -->
-        <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 1000 1000" preserveAspectRatio="none">
-          <template x-for="(m,i) in markers" :key="i">
-            <g>
-              <circle :cx="m.vx*1000" :cy="m.vy*1000" r="6" fill="none" stroke="#38bdf8" stroke-width="2"/>
-              <text :x="m.vx*1000+10" :y="m.vy*1000-6" font-size="22" fill="#bae6fd" font-family="ui-monospace,monospace" x-text="fmtT(m.t)"></text>
-            </g>
-          </template>
-          <template x-for="(ln,i) in lines" :key="'l'+i">
-            <g>
-              <line :x1="ln.a.vx*1000" :y1="ln.a.vy*1000" :x2="ln.b.vx*1000" :y2="ln.b.vy*1000"
-                    stroke="#22d3ee" stroke-width="2"/>
-              <text :x="((ln.a.vx+ln.b.vx)/2)*1000" :y="((ln.a.vy+ln.b.vy)/2)*1000 - 6"
-                    font-size="20" fill="#67e8f9" font-family="ui-monospace,monospace"
-                    x-text="ln.stats ? (`μ${fmtT(ln.stats.avg)}`) : ''"></text>
-            </g>
-          </template>
-          <template x-if="drawing">
-            <rect :x="Math.min(drawStart.vx,drawEnd.vx)*1000"
-                  :y="Math.min(drawStart.vy,drawEnd.vy)*1000"
-                  :width="Math.abs(drawEnd.vx-drawStart.vx)*1000"
-                  :height="Math.abs(drawEnd.vy-drawStart.vy)*1000"
-                  fill="rgba(34,197,94,0.12)" stroke="#22c55e" stroke-width="2" stroke-dasharray="6 4"/>
-          </template>
-          <!-- detection candidate previews -->
-          <template x-for="c in detectionCandidates" :key="'d'+c.id">
-            <rect :x="(c.roi.x/sensor.w)*1000" :y="(c.roi.y/sensor.h)*1000"
-                  :width="(c.roi.w/sensor.w)*1000" :height="(c.roi.h/sensor.h)*1000"
-                  fill="rgba(236,72,153,0.12)" stroke="#ec4899" stroke-width="2" stroke-dasharray="4 3"/>
-          </template>
-        </svg>
-
-        <!-- Hover probe pill -->
-        <div x-show="hover" x-transition
-             class="absolute pill rounded-md px-2 py-1 text-xs pointer-events-none"
-             :style="`left:${hover?.px+10}px; top:${hover?.py+10}px`">
-          <span class="font-mono" x-text="hover ? `x:${hover.sx} y:${hover.sy}` : ''"></span>
-          &nbsp; <span class="text-orange-300 font-mono" x-text="hover ? fmtT(hover.t) : ''"></span>
-        </div>
-
-        <!-- Global min/max pill top-left -->
-        <div class="absolute top-2 left-2 pill rounded-md px-2 py-1 text-xs font-mono">
-          min <span class="text-sky-300" x-text="fmtT(state.tmin)"></span>
-          &nbsp;/&nbsp; max <span class="text-rose-300" x-text="fmtT(state.tmax)"></span>
-        </div>
-
-        <!-- Recording pill top-right -->
-        <div x-show="recording.recording" class="absolute top-2 right-2 pill rounded-md px-3 py-1 text-xs font-mono flex items-center gap-2">
-          <span class="dot err animate-pulse"></span>
-          <span>REC</span>
-          <span x-text="fmtDur(recording.seconds)"></span>
-          <span class="muted" x-text="recording.frames + ' frames'"></span>
-        </div>
-
-        <div x-show="!live" class="absolute inset-0 flex items-center justify-center text-xs muted shimmer">connecting…</div>
+    </template>
+    <template x-if="!state.results?.length">
+      <div class="card p-4 text-center text-slate-400 text-sm">
+        No tanks configured yet. Press <span class="chip">Auto-detect</span> to find them.
       </div>
-    </section>
+    </template>
+  </aside>
+</main>
 
-    <!-- RIGHT: context panel -->
-    <aside class="card p-3 overflow-y-auto min-h-0">
+<!-- Bottom controls (stub for now) -->
+<footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <span>Operator Console v1</span>
+    <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
+  </div>
+  <div class="flex items-center gap-3">
+    <a class="hover:underline" :href="supervisorUrl" target="_blank">Supervisor dashboard -></a>
+  </div>
+</footer>
 
-      <!-- Palette -->
-      <div x-show="panel==='palette'">
-        <h2 class="text-sm font-semibold mb-2">Palette</h2>
-        <div class="grid grid-cols-2 gap-1 mb-3">
-          <template x-for="p in palettes" :key="p">
-            <button class="btn text-left" :class="config?.stream?.palette===p?'active':''"
-                    @click="patch({stream:{palette:p}})" x-text="p"></button>
-          </template>
-        </div>
-        <h3 class="text-xs font-semibold mt-4 mb-1">Source</h3>
-        <div class="grid grid-cols-3 gap-1">
-          <template x-for="s in ['thermal','visual','blend']" :key="s">
-            <button class="btn" :class="config?.stream?.source===s?'active':''" @click="patch({stream:{source:s}})" x-text="s"></button>
-          </template>
-        </div>
-
-        <h3 class="text-xs font-semibold mt-4 mb-1">Temperature range</h3>
-        <div class="flex items-center gap-2 mb-2">
-          <button class="btn flex-1"
-                  :class="config?.stream?.range_min==null ? 'active' : ''"
-                  @click="patch({stream:{range_min:null,range_max:null}})">Auto</button>
-          <button class="btn flex-1"
-                  :class="config?.stream?.range_min!=null ? 'active' : ''"
-                  @click="patch({stream:{range_min:Math.floor(state.tmin), range_max:Math.ceil(state.tmax)}})">Lock to current</button>
-        </div>
-        <template x-if="config?.stream?.range_min != null">
-          <div>
-            <label class="block mb-1">
-              <div class="text-xs muted">min: <span x-text="config.stream.range_min"></span>°C</div>
-              <input type="range" min="-20" max="100" step="0.5" class="w-full"
-                     :value="config.stream.range_min"
-                     @change="patch({stream:{range_min:+$event.target.value}})"/>
-            </label>
-            <label class="block mb-1">
-              <div class="text-xs muted">max: <span x-text="config.stream.range_max"></span>°C</div>
-              <input type="range" min="-10" max="200" step="0.5" class="w-full"
-                     :value="config.stream.range_max"
-                     @change="patch({stream:{range_max:+$event.target.value}})"/>
-            </label>
-          </div>
+<!-- Auto-detect modal -->
+<div x-show="detect.modal" x-transition class="fixed inset-0 z-50 modal-bg flex items-center justify-center p-6">
+  <div class="card w-full max-w-3xl p-5 max-h-[85vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">Auto-detect tanks</h2>
+      <button class="btn" @click="detect.modal=false;detect.show=false">Close</button>
+    </div>
+    <p class="text-sm text-slate-400 mb-3">
+      We sampled <span x-text="detect.framesUsed"></span> frames and found <span x-text="detect.candidates.length"></span> candidate(s).
+      Review each, set height and diameter, then accept.
+    </p>
+    <div class="flex gap-2 mb-3">
+      <button class="btn primary" @click="runDetect()" :disabled="detect.running" x-text="detect.running?'Scanning...':'Re-scan'"></button>
+      <button class="btn success" @click="acceptDetect()" :disabled="!detect.candidates.length">Accept & save</button>
+    </div>
+    <table class="w-full text-xs">
+      <thead class="text-left text-slate-400">
+        <tr><th class="p-1">#</th><th>Name</th><th>Medium</th><th>Height ft</th><th>Diameter ft</th><th>ROI</th><th>Conf.</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="(c,i) in detect.candidates" :key="c.id">
+          <tr class="border-t border-[#1f2630]">
+            <td class="p-1 k" x-text="i+1"></td>
+            <td><input class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-24" x-model="c.name"></td>
+            <td>
+              <select class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5" x-model="c.medium">
+                <option value="water">water</option>
+                <option value="oil">oil</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </td>
+            <td><input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-20" x-model.number="c.geometry.height_ft"></td>
+            <td><input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-20" x-model.number="c.geometry.diameter_ft"></td>
+            <td class="k text-slate-500" x-text="'['+c.roi.x+','+c.roi.y+' '+c.roi.w+'x'+c.roi.h+']'"></td>
+            <td class="k" x-text="Math.round((c.medium_confidence||0)*100)+'%'"></td>
+          </tr>
         </template>
+      </tbody>
+    </table>
+  </div>
+</div>
 
-        <h3 class="text-xs font-semibold mt-4 mb-1">Isotherm highlight</h3>
-        <label class="flex items-center justify-between text-sm py-1">
-          <span>Enabled</span>
-          <input type="checkbox" :checked="config?.stream?.isotherm_enabled"
-                 @change="patch({stream:{isotherm_enabled:$event.target.checked}})"/>
-        </label>
-        <template x-if="config?.stream?.isotherm_enabled">
-          <div>
-            <label class="block mb-1">
-              <div class="text-xs muted">from: <span x-text="config.stream.isotherm_min"></span>°C</div>
-              <input type="range" min="-20" max="100" step="0.5" class="w-full"
-                     :value="config.stream.isotherm_min"
-                     @change="patch({stream:{isotherm_min:+$event.target.value}})"/>
-            </label>
-            <label class="block mb-1">
-              <div class="text-xs muted">to: <span x-text="config.stream.isotherm_max"></span>°C</div>
-              <input type="range" min="-10" max="200" step="0.5" class="w-full"
-                     :value="config.stream.isotherm_max"
-                     @change="patch({stream:{isotherm_max:+$event.target.value}})"/>
-            </label>
-          </div>
-        </template>
-      </div>
+<!-- Tank edit modal -->
+<div x-show="editor.show" x-transition class="fixed inset-0 z-50 modal-bg flex items-center justify-center p-6">
+  <div class="card w-full max-w-lg p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">Edit tank</h2>
+      <button class="btn" @click="editor.show=false">Close</button>
+    </div>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Name</span>
+        <input class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model="editor.tank.name">
+      </label>
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Medium</span>
+        <select class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model="editor.tank.medium">
+          <option value="water">water</option>
+          <option value="oil">oil</option>
+          <option value="unknown">unknown</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Height ft</span>
+        <input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.geometry.height_ft">
+      </label>
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Diameter ft</span>
+        <input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.geometry.diameter_ft">
+      </label>
+      <label class="flex flex-col gap-1 col-span-2"><span class="text-slate-400 text-xs">Min temp delta C (confidence gate)</span>
+        <input type="number" step="0.1" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.min_temp_delta">
+      </label>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button class="btn primary" @click="saveEditor()">Save</button>
+      <button class="btn" @click="editor.show=false">Cancel</button>
+    </div>
+  </div>
+</div>
 
-      <!-- Image transforms -->
-      <div x-show="panel==='image'">
-        <h2 class="text-sm font-semibold mb-2">Image transforms</h2>
-        <h3 class="text-xs font-semibold mt-2 mb-1">Rotate</h3>
-        <div class="seg w-full">
-          <template x-for="r in [0,90,180,270]" :key="r">
-            <button :class="(config?.stream?.rotate||0)===r?'active':''"
-                    @click="patch({stream:{rotate:r}})" x-text="r+'°'"></button>
-          </template>
-        </div>
-        <h3 class="text-xs font-semibold mt-4 mb-1">Flip</h3>
-        <label class="flex items-center justify-between text-sm py-1">
-          <span>Horizontal</span>
-          <input type="checkbox" :checked="config?.stream?.flip_h"
-                 @change="patch({stream:{flip_h:$event.target.checked}})"/>
-        </label>
-        <label class="flex items-center justify-between text-sm py-1">
-          <span>Vertical</span>
-          <input type="checkbox" :checked="config?.stream?.flip_v"
-                 @change="patch({stream:{flip_v:$event.target.checked}})"/>
-        </label>
-        <h3 class="text-xs font-semibold mt-4 mb-1">Freeze frame</h3>
-        <label class="flex items-center justify-between text-sm py-1">
-          <span>Pause live</span>
-          <input type="checkbox" :checked="config?.stream?.freeze"
-                 @change="patch({stream:{freeze:$event.target.checked}})"/>
-        </label>
-        <h3 class="text-xs font-semibold mt-4 mb-1">Quick capture</h3>
-        <div class="flex gap-1">
-          <button class="btn flex-1" @click="snapshot()">📸 Snapshot PNG</button>
-          <button class="btn flex-1" :class="recording.recording?'rec':''" @click="toggleRecord()"
-                  x-text="recording.recording?'⏹ Stop':'● Record'"></button>
-        </div>
-      </div>
-
-      <!-- Overlays -->
-      <div x-show="panel==='overlays'">
-        <h2 class="text-sm font-semibold mb-2">Overlays</h2>
-        <template x-for="k in Object.keys(config?.stream?.overlay || {})" :key="k">
-          <label class="flex items-center justify-between py-1 text-sm">
-            <span x-text="k.replaceAll('_',' ')"></span>
-            <input type="checkbox"
-                   :checked="config.stream.overlay[k]"
-                   @change="patch({stream:{overlay:{[k]:$event.target.checked}}})"/>
-          </label>
-        </template>
-      </div>
-
-      <!-- Settings -->
-      <div x-show="panel==='settings'">
-        <h2 class="text-sm font-semibold mb-2">Settings</h2>
-        <label class="block mb-2">
-          <div class="text-xs muted mb-1">Stream FPS: <span x-text="config?.stream?.fps"></span></div>
-          <input type="range" min="1" max="25" step="1" class="w-full"
-                 :value="config?.stream?.fps"
-                 @change="patch({stream:{fps:+$event.target.value}})"/>
-        </label>
-        <label class="block mb-2">
-          <div class="text-xs muted mb-1">JPEG quality: <span x-text="config?.stream?.jpeg_quality"></span></div>
-          <input type="range" min="30" max="95" step="5" class="w-full"
-                 :value="config?.stream?.jpeg_quality"
-                 @change="patch({stream:{jpeg_quality:+$event.target.value}})"/>
-        </label>
-        <label class="block mb-2">
-          <div class="text-xs muted mb-1">Upscale: <span x-text="config?.stream?.upscale"></span>x</div>
-          <input type="range" min="1" max="4" step="1" class="w-full"
-                 :value="config?.stream?.upscale"
-                 @change="patch({stream:{upscale:+$event.target.value}})"/>
-        </label>
-        <label class="block mb-2">
-          <div class="text-xs muted mb-1">Temp unit</div>
-          <div class="flex gap-1">
-            <button class="btn flex-1" :class="config?.ui?.temp_unit==='C'?'active':''" @click="patch({ui:{temp_unit:'C'}})">°C</button>
-            <button class="btn flex-1" :class="config?.ui?.temp_unit==='F'?'active':''" @click="patch({ui:{temp_unit:'F'}})">°F</button>
-          </div>
-        </label>
-        <label class="block mb-2">
-          <div class="text-xs muted mb-1">Emissivity: <span x-text="config?.ui?.emissivity"></span></div>
-          <input type="range" min="0.5" max="1.0" step="0.01" class="w-full"
-                 :value="config?.ui?.emissivity"
-                 @change="patch({ui:{emissivity:+$event.target.value}})"/>
-        </label>
-      </div>
-
-      <!-- Tanks table -->
-      <div x-show="panel==='tanks'">
-        <h2 class="text-sm font-semibold mb-2">Tank configuration</h2>
-        <template x-for="t in tanks" :key="t.id">
-          <div class="card p-2 mb-2 text-xs">
-            <div class="flex justify-between mb-1">
-              <input class="bg-transparent border-b border-[#2a323d] font-semibold w-1/2"
-                     :value="t.name" @change="renameTank(t.id,$event.target.value)"/>
-              <span class="muted font-mono" x-text="t.id"></span>
-            </div>
-            <div class="grid grid-cols-4 gap-1 font-mono">
-              <div>x <span x-text="t.roi.x"></span></div>
-              <div>y <span x-text="t.roi.y"></span></div>
-              <div>w <span x-text="t.roi.w"></span></div>
-              <div>h <span x-text="t.roi.h"></span></div>
-            </div>
-            <label class="block mt-2">
-              <div class="muted">min_temp_delta °C: <span x-text="t.min_temp_delta"></span></div>
-              <input type="range" min="0.2" max="5" step="0.1" class="w-full"
-                     :value="t.min_temp_delta"
-                     @change="setTankField(t.id,'min_temp_delta',+$event.target.value)"/>
-            </label>
-          </div>
-        </template>
-        <button class="btn w-full mb-1" @click="toolMode='draw_roi'">+ Draw a new ROI</button>
-        <button class="btn w-full" @click="autoDetect()">✨ Auto-detect tanks</button>
-      </div>
-
-      <!-- Files -->
-      <div x-show="panel==='files'">
-        <h2 class="text-sm font-semibold mb-2">Captures</h2>
-        <h3 class="text-xs font-semibold mt-2 mb-1">Snapshots (<span x-text="files.snapshots?.length||0"></span>)</h3>
-        <template x-for="f in (files.snapshots||[])" :key="'s'+f.name">
-          <div class="flex items-center justify-between text-[11px] py-1 border-b border-[#1f2630]">
-            <a class="text-sky-300 font-mono truncate" :href="'/api/files/snapshots/'+f.name" x-text="f.name"></a>
-            <span class="muted" x-text="fmtBytes(f.bytes)"></span>
-          </div>
-        </template>
-        <h3 class="text-xs font-semibold mt-3 mb-1">Recordings (<span x-text="files.recordings?.length||0"></span>)</h3>
-        <template x-for="f in (files.recordings||[])" :key="'r'+f.name">
-          <div class="flex items-center justify-between text-[11px] py-1 border-b border-[#1f2630]">
-            <a class="text-sky-300 font-mono truncate" :href="'/api/files/recordings/'+f.name" x-text="f.name"></a>
-            <span class="muted" x-text="fmtBytes(f.bytes)"></span>
-          </div>
-        </template>
-        <button class="btn w-full mt-3" @click="refreshFiles()">Refresh</button>
-      </div>
-
-      <!-- Events -->
-      <div x-show="panel==='events'">
-        <h2 class="text-sm font-semibold mb-2">Events</h2>
-        <template x-for="e in events.slice().reverse()" :key="e.seq">
-          <div class="text-[11px] font-mono border-b border-[#1f2630] py-1">
-            <span class="muted" x-text="new Date(e.ts*1000).toLocaleTimeString()"></span>
-            <span class="mx-1" :class="eventColor(e.kind)" x-text="e.kind"></span>
-            <span x-text="eventDetail(e)"></span>
-          </div>
-        </template>
-        <div x-show="!events.length" class="text-xs muted">no events yet</div>
-      </div>
-
-    </aside>
-  </main>
 </div>
 
 <script>
 function app(){
   return {
-    deviceId: location.hostname,
+    // state
     config: null,
-    state:  {tmin:0,tmax:0,results:[],tanks:[]},
-    tanks:  [],
-    events: [],
-    eventSeq: 0,
+    state: { results: [], tmin: 0, tmax: 0, w:0, h:0, frame_idx:0 },
+    recording: { recording:false, seconds:0 },
+    panel: null,
+    unit: 'ft',
     live: false,
-    panel: 'palette',
-    toolMode: 'probe',
-    palettes: ['grayscale','iron','rainbow','hot','inferno','plasma','magma','jet','turbo','cividis'],
-    hover: null,
-    markers: [],
-    lines: [],
-    lastLine: null,
-    drawing: false,
-    drawStart: null,
-    drawEnd:   null,
-    lineStart: null,
-    recording: {recording:false, frames:0, seconds:0},
-    detectionCandidates: [],
-    files: {snapshots:[], recordings:[]},
-    sensor: {w: 256, h: 192},
-    _probeBusy: false,
+    banner: null,
+    calibrating: false,
+    detect: { modal:false, show:false, running:false, framesUsed:0, candidates:[] },
+    editor: { show:false, tank:null },
 
-    get resultsById(){ const m={}; for(const r of this.state.results||[]) m[r.id]=r; return m; },
-    get frameInfo(){
-      const s=this.state;
-      return `frame ${s.frame_idx||0} · sensor ${this.sensor.w}×${this.sensor.h} · display ${s.w||0}×${s.h||0} (${s.upscale||1}×)`;
+    // derived
+    get deviceHost(){ return location.host.replace(/\/$/,''); },
+    get siteId(){ return this.config?.site?.id || '-'; },
+    get streamUrl(){ return '/stream.mjpg?t=' + Math.floor(Date.now()/5000); },
+    get supervisorUrl(){
+      try {
+        const h = location.hostname;
+        const m = h.match(/^p8080-(n-[a-z0-9-]+)-(.*)$/i);
+        if (m) return location.protocol + '//p1880-' + m[1] + '-' + m[2] + '/ui';
+      } catch(e) {}
+      return location.protocol + '//' + location.hostname + ':1880/ui';
     },
-    get fpsLabel(){ return (this.state.fps||0).toFixed(1) + ' fps'; },
-
-    fmtT(t){
-      if(t===undefined||t===null||Number.isNaN(t)) return '—';
-      const u=this.config?.ui?.temp_unit||'C';
-      return u==='F' ? (t*9/5+32).toFixed(1)+'°F' : t.toFixed(1)+'°C';
-    },
-    fmtBytes(b){
-      if(!b) return '—';
-      if(b<1024) return b+' B';
-      if(b<1048576) return (b/1024).toFixed(1)+' KB';
-      return (b/1048576).toFixed(1)+' MB';
-    },
-    fmtDur(s){
-      s = Math.floor(s||0);
-      const m = Math.floor(s/60), r = s%60;
-      return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
-    },
-    eventColor(k){ return {
-      'level_change':'text-amber-400','low_confidence':'text-rose-400',
-      'tank_added':'text-emerald-400','tank_removed':'text-slate-400',
-      'config_change':'text-sky-400','auto_detect':'text-pink-400',
-      'snapshot':'text-yellow-300','record_start':'text-red-400','record_stop':'text-red-300'
-    }[k] || 'text-slate-200'; },
-    eventDetail(e){
-      const o = {...e};
-      delete o.seq; delete o.ts; delete o.kind;
-      return Object.keys(o).length ? JSON.stringify(o).slice(0,150) : '';
+    get fpsLabel(){
+      const f = this.state?.fps ? this.state.fps.toFixed(1) : '-';
+      return f + ' fps';
     },
 
     async boot(){
-      await this.refreshConfig();
-      // Compute sensor dims from first /api/state (upscale=1 gives sensor, else divide)
-      this.poll();
-      this.pollEvents();
-      this.pollRecording();
-      this.refreshFiles();
+      await this.reloadConfig();
+      this.unit = this.config?.ui?.level_unit || 'ft';
+      this.tick();
+      setInterval(()=>this.tick(), 1500);
+      setInterval(()=>this.pollRecording(), 2000);
     },
-    async refreshConfig(){
-      const r=await fetch('/api/config'); this.config=await r.json();
-      this.tanks=this.config.tanks||[];
+    async reloadConfig(){
+      try {
+        const r = await fetch('/api/config'); this.config = await r.json();
+      } catch(e){ this.banner = 'Cannot reach /api/config ('+e+')'; }
     },
-    async poll(){
-      try{
-        const r=await fetch('/api/state'); const j=await r.json();
-        this.state=j; this.live=true;
-        if(j.w && j.upscale){ this.sensor={w: Math.round(j.w/j.upscale), h: Math.round(j.h/j.upscale)}; }
-      }catch(e){ this.live=false; }
-      setTimeout(()=>this.poll(), 800);
-    },
-    async pollEvents(){
-      try{
-        const r=await fetch('/api/events?since='+this.eventSeq);
-        const arr=await r.json();
-        if(arr.length){ this.events.push(...arr); this.eventSeq=arr[arr.length-1].seq; }
-      }catch(e){}
-      setTimeout(()=>this.pollEvents(), 2000);
+    async tick(){
+      try {
+        const r = await fetch('/api/state'); const s = await r.json();
+        this.state = s; this.live = true;
+        // Low-thermal-delta banner
+        const cal = this.config?.calibration;
+        if (cal?.notes?.length && !this.banner) this.banner = cal.notes[0];
+      } catch(e){ this.live = false; }
     },
     async pollRecording(){
-      try{
-        const r=await fetch('/api/record/status');
-        this.recording=await r.json();
-      }catch(e){}
-      setTimeout(()=>this.pollRecording(), 1000);
+      try {
+        const r = await fetch('/api/record/status'); this.recording = await r.json();
+      } catch(e){}
     },
-    async refreshFiles(){
-      try{
-        const r=await fetch('/api/files');
-        this.files=await r.json();
-      }catch(e){}
+    async patch(p){
+      await fetch('/api/config', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(p)});
+      await this.reloadConfig();
     },
-
-    async patch(partial){
-      const r=await fetch('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(partial)});
-      if(r.ok){ await this.refreshConfig(); }
+    async setUnit(u){
+      this.unit = u;
+      await this.patch({ui:{level_unit:u}});
     },
-
-    // ---- snapshot / record / autodetect ----
+    cardClass(t){
+      const p = t.level_pct||0;
+      if (t.confidence !== 'high') return 'lo';
+      if (p < 15 || p > 92) return 'al';
+      return 'hi';
+    },
+    valueTint(t){
+      const p = t.level_pct||0;
+      if (t.confidence !== 'high') return 'lo';
+      if (p < 15 || p > 92) return 'al';
+      return 'hi';
+    },
+    primaryLabel(t){
+      const r = t.reading;
+      if (!r) return (t.level_pct||0).toFixed(1) + ' %';
+      if (this.unit === 'in') return (r.level_in||0).toFixed(1) + ' in';
+      return (r.level_ft||0).toFixed(2) + ' ft';
+    },
+    secondaryLabel(t){
+      const r = t.reading;
+      if (!r) return '';
+      if (this.unit === 'in') return 'of ' + ((t.geometry?.height_ft||0)*12).toFixed(0) + ' in';
+      return 'of ' + (t.geometry?.height_ft||0) + ' ft';
+    },
+    thirdLabel(t){
+      const r = t.reading;
+      if (!r) return (t.level_pct||0).toFixed(1)+' %';
+      return Math.round(r.volume_bbl||0).toLocaleString() + ' bbl (' + (t.level_pct||0).toFixed(0) + '%)';
+    },
+    rateLabel(t){
+      const rate = t.reading?.fill_rate_bbl_h;
+      if (rate == null) return '-';
+      const sign = rate > 0 ? 'arrow-up' : (rate < 0 ? 'arrow-dn' : 'arrow-zero');
+      const arrow = rate > 0 ? '^' : (rate < 0 ? 'v' : '=');
+      return arrow + ' ' + Math.abs(rate).toFixed(1) + ' bbl/h';
+    },
+    etaLabel(t){
+      const r = t.reading;
+      if (!r) return '-';
+      if (r.minutes_to_full != null) return this.fmtDur(r.minutes_to_full*60) + ' to full';
+      if (r.minutes_to_empty != null) return this.fmtDur(r.minutes_to_empty*60) + ' to empty';
+      return 'stable';
+    },
+    fmtDur(sec){
+      if (sec == null) return '-';
+      sec = Math.max(0, Math.round(sec));
+      const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+      if (h) return h+'h '+m+'m';
+      if (m) return m+'m '+s+'s';
+      return s+'s';
+    },
+    fmt(n, d){ if (n==null) return '-'; return Number(n).toFixed(d==null?1:d); },
+    candidateStyle(c){
+      const img = document.querySelector('.stream-wrap img');
+      if (!img || !this.state.w || !this.state.h) return '';
+      const rect = img.getBoundingClientRect();
+      const wrap = img.parentElement.getBoundingClientRect();
+      const sx = rect.width / this.state.w;
+      const sy = rect.height / this.state.h;
+      const offX = rect.left - wrap.left;
+      const offY = rect.top - wrap.top;
+      return 'left:'+(offX + c.roi.x*sx)+'px;top:'+(offY + c.roi.y*sy)+'px;width:'+(c.roi.w*sx)+'px;height:'+(c.roi.h*sy)+'px';
+    },
+    async openDetectModal(){
+      this.detect.modal = true;
+      await this.runDetect();
+    },
+    async runDetect(){
+      this.detect.running = true;
+      try {
+        const r = await fetch('/api/detect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({max:6, samples:20, timeout_s:6})});
+        const j = await r.json();
+        this.detect.framesUsed = j.frames_used || 0;
+        // Give every candidate a default geometry so the inputs work.
+        this.detect.candidates = (j.candidates||[]).map((c,i) => ({
+          ...c,
+          geometry: { height_ft: 20, diameter_ft: 10, shape: 'vertical_cylinder' }
+        }));
+        this.detect.show = true;
+      } catch(e){ this.banner = 'Auto-detect failed: ' + e; }
+      this.detect.running = false;
+    },
+    async acceptDetect(){
+      const body = { tanks: this.detect.candidates.map(c => ({
+        id: c.id, name: c.name, medium: c.medium, roi: c.roi,
+        geometry: c.geometry, min_temp_delta: c.min_temp_delta || 0.8,
+      }))};
+      await fetch('/api/detect/accept', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      this.detect.modal = false; this.detect.show = false;
+      await this.reloadConfig();
+    },
+    async runCalibrate(){
+      this.calibrating = true;
+      try {
+        const r = await fetch('/api/calibrate', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({samples:30, timeout_s:12})});
+        const j = await r.json();
+        if (j.error) this.banner = 'Calibration error: ' + j.error;
+        else {
+          const c = j.calibration;
+          this.banner = 'Calibrated: e=' + c.emissivity + ', reflect=' + c.reflect_temp_c + ' C, range ' + c.range_min_c + '..' + c.range_max_c;
+        }
+      } catch(e){ this.banner = 'Calibration failed: ' + e; }
+      this.calibrating = false;
+      await this.reloadConfig();
+    },
     async snapshot(){
-      const r = await fetch('/api/snapshot',{method:'POST'});
-      if(r.ok){ await this.refreshFiles(); }
+      try { await fetch('/api/snapshot', {method:'POST'}); this.banner = 'Snapshot saved.'; } catch(e){}
     },
     async toggleRecord(){
-      const url = this.recording.recording ? '/api/record/stop' : '/api/record/start';
-      await fetch(url, {method:'POST'});
-      await this.refreshFiles();
+      try {
+        if (this.recording.recording) await fetch('/api/record/stop', {method:'POST'});
+        else await fetch('/api/record/start', {method:'POST'});
+      } catch(e){}
+      await this.pollRecording();
     },
-    async autoDetect(){
-      const r = await fetch('/api/detect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max:4})});
-      const j = await r.json();
-      this.detectionCandidates = j.candidates || [];
-      this.panel = 'tanks';
+    editTank(t){
+      this.editor.tank = JSON.parse(JSON.stringify(Object.assign({
+        geometry:{height_ft:20, diameter_ft:10, shape:'vertical_cylinder'},
+        min_temp_delta: 1.0
+      }, t)));
+      this.editor.show = true;
     },
-    async acceptDetection(){
-      await fetch('/api/detect/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tanks:this.detectionCandidates})});
-      this.detectionCandidates = [];
-      await this.refreshConfig();
+    async saveEditor(){
+      const t = this.editor.tank;
+      await fetch('/api/tanks/'+encodeURIComponent(t.id), {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+        name: t.name, medium: t.medium, geometry: t.geometry, min_temp_delta: t.min_temp_delta
+      })});
+      this.editor.show = false;
+      await this.reloadConfig();
     },
-
-    // ---- coord math ----
-    mapEvent(e){
-      const img=document.getElementById('mjpeg');
-      const r=img.getBoundingClientRect();
-      const px=e.clientX-r.left, py=e.clientY-r.top;
-      const nw=img.naturalWidth||1, nh=img.naturalHeight||1;
-      const scale=Math.min(r.width/nw, r.height/nh);
-      const dw=nw*scale, dh=nh*scale;
-      const ox=(r.width-dw)/2, oy=(r.height-dh)/2;
-      const ix=(px-ox)/scale, iy=(py-oy)/scale;
-      if(ix<0||iy<0||ix>nw||iy>nh) return null;
-      const up=this.config?.stream?.upscale||1;
-      const sx=Math.round(ix/up), sy=Math.round(iy/up);
-      return {px, py, sx, sy, vx:px/r.width, vy:py/r.height};
-    },
-
-    async probe(sx, sy){
-      if(this._probeBusy) return null;
-      this._probeBusy=true;
-      try{
-        const r=await fetch(`/api/temp?x=${sx}&y=${sy}`);
-        return (await r.json()).t;
-      } finally { this._probeBusy=false; }
-    },
-    async lineStats(a, b){
-      const r = await fetch(`/api/line?x1=${a.sx}&y1=${a.sy}&x2=${b.sx}&y2=${b.sy}`);
-      return await r.json();
-    },
-
-    async onMove(e){
-      const m=this.mapEvent(e); if(!m){ this.hover=null; return; }
-      const now=performance.now();
-      if(!this._lastHover || now-this._lastHover>120){
-        this._lastHover=now;
-        m.t = await this.probe(m.sx, m.sy);
-      } else {
-        m.t = this.hover?.t;
-      }
-      this.hover=m;
-      if(this.drawing){ this.drawEnd=m; }
-    },
-
-    async onDown(e){
-      const m=this.mapEvent(e); if(!m) return;
-      if(this.toolMode==='draw_roi'){
-        this.drawing=true; this.drawStart=m; this.drawEnd=m;
-      } else if(this.toolMode==='marker'){
-        const t=await this.probe(m.sx,m.sy);
-        this.markers.push({sx:m.sx, sy:m.sy, t, vx:m.vx, vy:m.vy});
-      } else if(this.toolMode==='probe'){
-        const t=await this.probe(m.sx,m.sy);
-        this.markers=[{sx:m.sx, sy:m.sy, t, vx:m.vx, vy:m.vy}];
-      } else if(this.toolMode==='line'){
-        this.lineStart = m;
-      }
-    },
-    async onUp(e){
-      if(this.toolMode==='draw_roi' && this.drawing){
-        this.drawing=false;
-        const a=this.drawStart, b=this.drawEnd;
-        const x=Math.round(Math.min(a.sx,b.sx)), y=Math.round(Math.min(a.sy,b.sy));
-        const w=Math.round(Math.abs(a.sx-b.sx)), h=Math.round(Math.abs(a.sy-b.sy));
-        if(w>4 && h>6){
-          const id='tank_'+String(this.tanks.length+1).padStart(2,'0');
-          await fetch('/api/tanks',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({id, name:'Tank '+(this.tanks.length+1), medium:'water',
-                                 roi:{x,y,w,h}, min_temp_delta:1.0})});
-          await this.refreshConfig();
-        }
-        this.drawStart=null; this.drawEnd=null;
-      } else if(this.toolMode==='line' && this.lineStart){
-        const m = this.mapEvent(e);
-        if(m){
-          const stats = await this.lineStats(this.lineStart, m);
-          this.lines.push({a:this.lineStart, b:m, stats});
-          this.lastLine = stats;
-        }
-        this.lineStart = null;
-      }
-    },
-
     async removeTank(id){
+      if (!confirm('Remove '+id+'?')) return;
       await fetch('/api/tanks/'+encodeURIComponent(id), {method:'DELETE'});
-      await this.refreshConfig();
-    },
-    async renameTank(id, name){
-      await fetch('/api/tanks/'+encodeURIComponent(id), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
-      await this.refreshConfig();
-    },
-    async setTankField(id, field, value){
-      await fetch('/api/tanks/'+encodeURIComponent(id), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({[field]:value})});
-      await this.refreshConfig();
+      await this.reloadConfig();
     },
   };
 }
