@@ -1,0 +1,52 @@
+# ============================================================
+# Thermal Tank Level Detection — Configuration
+# ============================================================
+# Camera confirmed on N-1065:
+#   /dev/video0  USB VID:PID 0bda:5830  Generic USB Camera
+#   Formats available: YUYV 256x192 @ 25fps, YUYV 256x384 @ 25fps
+#   -> 256x384 is the DUAL frame: top 256x192 = visual, bottom 256x192 = thermal raw
+# ============================================================
+
+camera:
+  device: /dev/video0
+  width: 256
+  height: 384          # 384 = dual_yuyv mode (confirmed 2026-04-17)
+  fps: 25
+  decoder: dual_yuyv
+  kelvin_divisor: 64.0
+
+analysis:
+  interval_seconds: 2
+  smoothing_window: 7
+  min_samples: 5
+  gradient_method: sobel
+  invert_level: false
+
+tanks:
+  # Placeholder ROIs — will be set after the camera points at real tanks.
+  # Run `tools/roi_picker.py` on any machine with the camera to get real coords.
+  - id: tank_01
+    name: "Tank 1"
+    medium: water
+    roi: { x: 30,  y: 10, w: 40, h: 170 }
+    min_temp_delta: 1.2
+  - id: tank_02
+    name: "Tank 2"
+    medium: oil
+    roi: { x: 140, y: 10, w: 40, h: 170 }
+    min_temp_delta: 1.0
+
+# HTTP POST to Node-RED endpoint (set up in the shipped flow)
+publisher:
+  endpoint: "http://host.docker.internal:1880/thermal/ingest"
+  # Fallback for hosts without host.docker.internal (pre-Docker 20): use --network=host
+  # and set endpoint to "http://127.0.0.1:1880/thermal/ingest"
+  timeout: 3.0
+
+stream:
+  enabled: true
+  port: 8080
+  fps: 5
+  upscale: 2
+  jpeg_quality: 75
+  draw_overlay: true

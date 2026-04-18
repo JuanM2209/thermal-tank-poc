@@ -1,0 +1,32 @@
+# Cloudflare Tunnel config — extend your existing tunnel (Oracle VM / Tyrion).
+#
+# Option A: if cloudflared is on the Nucleus itself:
+#   1. Install & auth:  cloudflared tunnel login
+#   2. Create tunnel:   cloudflared tunnel create nucleus-thermal
+#   3. Route DNS:       cloudflared tunnel route dns nucleus-thermal thermal.yourdomain.com
+#   4. Copy this file to /etc/cloudflared/config.yml and replace UUID + path
+#   5. Install service: cloudflared service install
+#
+# Option B: if you're already tunneling via Oracle VM, add a new hostname there
+#   pointing to http://NUCLEUS_LAN_IP:8080 for the stream and :1880 for Node-RED.
+
+tunnel: <TUNNEL-UUID>
+credentials-file: /etc/cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  # Thermal MJPEG + web UI
+  - hostname: thermal-stream.yourdomain.com
+    service: http://localhost:8080
+
+  # Node-RED dashboard (tank levels, charts)
+  - hostname: thermal-dash.yourdomain.com
+    service: http://localhost:1880
+    originRequest:
+      noTLSVerify: true
+
+  # MQTT over WebSockets (optional — only if you add `listener 9001 websockets`
+  # to mosquitto.conf and publish from a browser-side app)
+  # - hostname: thermal-mqtt.yourdomain.com
+  #   service: http://localhost:9001
+
+  - service: http_status:404
