@@ -438,10 +438,14 @@ function app(){
     nextMId: 1,
     _canvasNeedsInit: true,
 
+    // stable stream URL — set ONCE at data-init. A getter would re-evaluate
+    // on every Alpine reactive tick and, with a cache-buster, would replace
+    // the <img> src every few seconds, killing the ongoing MJPEG connection.
+    streamUrl: '/stream.mjpg?t=' + Date.now(),
+
     // derived
     get deviceHost(){ return location.host.replace(/\/$/,''); },
     get siteId(){ return this.config?.site?.id || '-'; },
-    get streamUrl(){ return '/stream.mjpg?t=' + Math.floor(Date.now()/5000); },
     get supervisorUrl(){
       try {
         const h = location.hostname;
