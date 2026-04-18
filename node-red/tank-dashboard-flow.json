@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "Thermal Tanks",
     "disabled": false,
-    "info": "Thermal tank Supervisor dashboard v0.4.2\n\nPOST endpoint:   /thermal/ingest  (pushed by the thermal-analyzer container)\nThermal API:     flow.thermal_base (default resolved from hostname, override with THERMAL_API)\n\nGroups (page width = 24 cells):\n  \u2022 Overview       \u2014 full-width site header + deep link to operator console\n  \u2022 Tank Config    \u2014 collapsed panel: rename tanks, override medium (water/oil/auto)\n  \u2022 Live View      \u2014 MJPEG stream (width 14)\n  \u2022 Tanks          \u2014 per-tank KPI cards stacked vertically (width 10, sidebar)\n  \u2022 Trends         \u2014 24 h level & temperature history\n  \u2022 Alerts         \u2014 persisted out-of-band history (bounded 200 rows)\n  \u2022 Events         \u2014 raw ingest log (collapsed)\n\nUser-configurable overrides live in flow.context('tank_overrides') = {\n  '<tank_id>': { name: '<display name>', medium: 'auto' | 'water' | 'oil' }\n}\nOverrides are applied inside ingest-process before any downstream rendering.\n"
+    "info": "Thermal tank Supervisor dashboard v0.4.2\n\nPOST endpoint:   /thermal/ingest  (pushed by the thermal-analyzer container)\nThermal API:     flow.thermal_base (default resolved from hostname, override with THERMAL_API)\n\nGroups (page width = 24 cells):\n  • Overview       — full-width site header + deep link to operator console\n  • Tank Config    — collapsed panel: rename tanks, override medium (water/oil/auto)\n  • Live View      — MJPEG stream (width 14)\n  • Tanks          — per-tank KPI cards stacked vertically (width 10, sidebar)\n  • Trends         — 24 h level & temperature history\n  • Alerts         — persisted out-of-band history (bounded 200 rows)\n  • Events         — raw ingest log (collapsed)\n\nUser-configurable overrides live in flow.context('tank_overrides') = {\n  '<tank_id>': { name: '<display name>', medium: 'auto' | 'water' | 'oil' }\n}\nOverrides are applied inside ingest-process before any downstream rendering.\n"
   },
   {
     "id": "dash-ui-base",
@@ -32,17 +32,50 @@
         "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif"
       },
       "themeState": {
-        "base-color": { "default": "#097479", "value": "#2563eb", "edited": true },
-        "page-titlebar-backgroundColor": { "value": "#0d1117", "edited": true },
-        "page-backgroundColor": { "value": "#0a0e13", "edited": true },
-        "page-sidebar-backgroundColor": { "value": "#1e293b", "edited": true },
-        "group-textColor": { "value": "#e6e6e6", "edited": true },
-        "group-borderColor": { "value": "#2a3240", "edited": true },
-        "group-backgroundColor": { "value": "#1c222b", "edited": true },
-        "widget-textColor": { "value": "#e6e6e6", "edited": true },
-        "widget-backgroundColor": { "value": "#1c222b", "edited": true },
-        "widget-borderColor": { "value": "#2a3240", "edited": true },
-        "base-font": { "value": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif" }
+        "base-color": {
+          "default": "#097479",
+          "value": "#2563eb",
+          "edited": true
+        },
+        "page-titlebar-backgroundColor": {
+          "value": "#0d1117",
+          "edited": true
+        },
+        "page-backgroundColor": {
+          "value": "#0a0e13",
+          "edited": true
+        },
+        "page-sidebar-backgroundColor": {
+          "value": "#1e293b",
+          "edited": true
+        },
+        "group-textColor": {
+          "value": "#e6e6e6",
+          "edited": true
+        },
+        "group-borderColor": {
+          "value": "#2a3240",
+          "edited": true
+        },
+        "group-backgroundColor": {
+          "value": "#1c222b",
+          "edited": true
+        },
+        "widget-textColor": {
+          "value": "#e6e6e6",
+          "edited": true
+        },
+        "widget-backgroundColor": {
+          "value": "#1c222b",
+          "edited": true
+        },
+        "widget-borderColor": {
+          "value": "#2a3240",
+          "edited": true
+        },
+        "base-font": {
+          "value": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif"
+        }
       },
       "angularTheme": {
         "primary": "indigo",
@@ -59,7 +92,16 @@
       "lockMenu": "false",
       "allowTempTheme": "false",
       "dateFormat": "DD/MM/YYYY",
-      "sizes": { "sx": 48, "sy": 48, "gx": 6, "gy": 6, "cx": 6, "cy": 6, "px": 0, "py": 0 }
+      "sizes": {
+        "sx": 48,
+        "sy": 48,
+        "gx": 6,
+        "gy": 6,
+        "cx": 6,
+        "cy": 6,
+        "px": 0,
+        "py": 0
+      }
     }
   },
   {
@@ -141,13 +183,16 @@
     "width": "24",
     "collapse": true
   },
-
   {
     "id": "inject-startup",
     "type": "inject",
     "z": "thermal-tab",
     "name": "on start",
-    "props": [{ "p": "payload" }],
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
     "repeat": "",
     "crontab": "",
     "once": true,
@@ -157,7 +202,11 @@
     "payloadType": "date",
     "x": 110,
     "y": 40,
-    "wires": [["cfg-init"]]
+    "wires": [
+      [
+        "cfg-init"
+      ]
+    ]
   },
   {
     "id": "cfg-init",
@@ -168,9 +217,10 @@
     "outputs": 1,
     "x": 330,
     "y": 40,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "http-ingest",
     "type": "http in",
@@ -182,7 +232,11 @@
     "swaggerDoc": "",
     "x": 140,
     "y": 120,
-    "wires": [["ingest-process"]]
+    "wires": [
+      [
+        "ingest-process"
+      ]
+    ]
   },
   {
     "id": "http-response",
@@ -205,16 +259,30 @@
     "x": 370,
     "y": 120,
     "wires": [
-      ["tpl-tank-cards", "tpl-tank-config"],
-      ["chart-level"],
-      ["chart-temp"],
-      ["alert-guard"],
-      ["http-response"],
-      ["events-text"],
-      ["tpl-overview"]
+      [
+        "tpl-tank-cards",
+        "tpl-tank-config"
+      ],
+      [
+        "chart-level"
+      ],
+      [
+        "chart-temp"
+      ],
+      [
+        "alert-guard"
+      ],
+      [
+        "http-response"
+      ],
+      [
+        "events-text"
+      ],
+      [
+        "tpl-overview"
+      ]
     ]
   },
-
   {
     "id": "tpl-overview",
     "type": "ui_template",
@@ -223,17 +291,18 @@
     "name": "Site header",
     "order": 1,
     "width": 24,
-    "height": 2,
-    "format": "<style>\n.ov{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}\n.ov .l{display:flex;align-items:center;gap:14px;min-width:0}\n.ov .l .site{display:flex;flex-direction:column;min-width:0}\n.ov .l .site .t1{font-size:18px;font-weight:700;letter-spacing:-0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.ov .l .site .t2{font-size:11px;color:#94a3b8;font-family:monospace}\n.ov .chips{display:flex;gap:6px;flex-wrap:wrap}\n.ov .chip{font-size:10px;padding:3px 8px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase;font-weight:700}\n.ov .chip.ok{background:#052e16;color:#4ade80}\n.ov .chip.warn{background:#2a1f00;color:#fbbf24}\n.ov .chip.bad{background:#3f1d1d;color:#fca5a5}\n.ov .chip.n{background:#1e293b;color:#94a3b8}\n.ov a.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap}\n.ov a.btn:hover{background:#1d4ed8}\n</style>\n<div class=\"ov\">\n  <div class=\"l\">\n    <div class=\"site\">\n      <div class=\"t1\">{{msg.payload.site_id || 'supervisor'}}</div>\n      <div class=\"t2\">{{msg.payload.n || 0}} tanks &middot; {{msg.payload.ts ? (msg.payload.ts | date:'HH:mm:ss') : '--:--:--'}}</div>\n    </div>\n    <div class=\"chips\">\n      <span class=\"chip\" ng-class=\"{ ok: fresh, warn: !fresh && msg.payload.ts, bad: !msg.payload.ts }\" ng-init=\"fresh = (msg.payload.ts && (Date.now() - msg.payload.ts) < 30000)\">{{fresh ? 'live' : (msg.payload.ts ? 'stale' : 'offline')}}</span>\n      <span class=\"chip\" ng-class=\"{ ok: msg.payload.calibration && msg.payload.calibration.calibrated_at, n: !msg.payload.calibration || !msg.payload.calibration.calibrated_at }\">{{msg.payload.calibration && msg.payload.calibration.calibrated_at ? 'calibrated' : 'uncalibrated'}}</span>\n    </div>\n  </div>\n  <a class=\"btn\" id=\"op-link\" href=\"#\" target=\"_blank\" rel=\"noopener\">Operator Console \u2197</a>\n</div>\n<script>\n(function(){\n  function apply(){\n    var a = document.getElementById('op-link');\n    if (!a) return setTimeout(apply, 100);\n    var h = location.hostname;\n    var m = h.match(/^p1880-(n-[a-z0-9-]+)-(.*)$/i);\n    a.href = m ? (location.protocol + '//p8080-' + m[1] + '-' + m[2] + '/') : (location.protocol + '//' + h + ':8080/');\n  }\n  setTimeout(apply, 0);\n})();\n</script>",
+    "height": 3,
+    "format": "<style>\n.ov{display:flex;align-items:center;gap:14px;padding:10px 14px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100%;background:linear-gradient(135deg,#121821 0%,#1a222d 100%);border-radius:12px;border:1px solid #2a3240;box-sizing:border-box}\n.ov .site{display:flex;flex-direction:column;min-width:0;padding-right:14px;border-right:1px solid #2a3240;flex:0 0 auto}\n.ov .site .t1{font-size:17px;font-weight:700;letter-spacing:-0.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}\n.ov .site .t2{font-size:10px;color:#64748b;font-family:monospace;text-transform:uppercase;letter-spacing:.08em;margin-top:3px}\n.ov .kpis{display:flex;gap:10px;flex:1 1 auto;min-width:0;overflow:hidden}\n.ov .kpi{background:#0f1419;border:1px solid #1f2937;border-radius:10px;padding:7px 14px;display:flex;flex-direction:column;gap:1px;min-width:72px}\n.ov .kpi .v{font-size:20px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;font-variant-numeric:tabular-nums;color:#e6e6e6}\n.ov .kpi .l{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.1em;font-weight:700}\n.ov .kpi.oil{border-color:#3b1d09}.ov .kpi.oil .v{color:#fb923c}\n.ov .kpi.water{border-color:#082f49}.ov .kpi.water .v{color:#38bdf8}\n.ov .kpi.alert{border-color:#3f1d1d}.ov .kpi.alert .v{color:#fca5a5}\n.ov .kpi.avg .v{color:#4ade80}\n.ov .r{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto}\n.ov .chips{display:flex;gap:5px}\n.ov .chip{font-size:9px;padding:3px 8px;border-radius:8px;letter-spacing:.06em;text-transform:uppercase;font-weight:700}\n.ov .chip.ok{background:#052e16;color:#4ade80}\n.ov .chip.warn{background:#2a1f00;color:#fbbf24}\n.ov .chip.bad{background:#3f1d1d;color:#fca5a5}\n.ov .chip.n{background:#1e293b;color:#94a3b8}\n.ov a.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(37,99,235,0.3)}\n.ov a.btn:hover{background:#1d4ed8}\n</style>\n<div class=\"ov\" ng-init=\"tanks = (msg.payload && msg.payload.tanks) || []\">\n  <div class=\"site\">\n    <div class=\"t1\">{{msg.payload.site_id || 'Supervisor'}}</div>\n    <div class=\"t2\">{{msg.payload.ts ? (msg.payload.ts | date:'yyyy-MM-dd HH:mm:ss') : '--:--:--'}}</div>\n  </div>\n  <div class=\"kpis\">\n    <div class=\"kpi\"><div class=\"v\">{{tanks.length}}</div><div class=\"l\">Tanks</div></div>\n    <div class=\"kpi oil\"><div class=\"v\">{{(tanks | filter:{medium:'oil'}).length}}</div><div class=\"l\">Oil</div></div>\n    <div class=\"kpi water\"><div class=\"v\">{{(tanks | filter:{medium:'water'}).length}}</div><div class=\"l\">Water</div></div>\n    <div class=\"kpi alert\"><div class=\"v\">{{countAlerts(tanks)}}</div><div class=\"l\">Alerts</div></div>\n    <div class=\"kpi avg\"><div class=\"v\">{{tanks.length ? (avgLevel(tanks)/tanks.length | number:0) : '--'}}%</div><div class=\"l\">Avg Level</div></div>\n  </div>\n  <div class=\"r\">\n    <div class=\"chips\">\n      <span class=\"chip\" ng-class=\"{ ok: fresh, warn: !fresh && msg.payload.ts, bad: !msg.payload.ts }\" ng-init=\"fresh = (msg.payload.ts && (Date.now() - msg.payload.ts) < 30000)\">{{fresh ? 'live' : (msg.payload.ts ? 'stale' : 'offline')}}</span>\n      <span class=\"chip\" ng-class=\"{ ok: msg.payload.calibration && msg.payload.calibration.calibrated_at, n: !msg.payload.calibration || !msg.payload.calibration.calibrated_at }\">{{msg.payload.calibration && msg.payload.calibration.calibrated_at ? 'cal' : 'uncal'}}</span>\n    </div>\n    <a class=\"btn\" id=\"op-link\" href=\"#\" target=\"_blank\" rel=\"noopener\">Operator ↗</a>\n  </div>\n</div>\n<script>\n(function(){\n  function apply(){\n    var a = document.getElementById('op-link');\n    if (!a) return setTimeout(apply, 100);\n    var h = location.hostname;\n    var m = h.match(/^p1880-(n-[a-z0-9-]+)-(.*)$/i);\n    a.href = m ? (location.protocol + '//p8080-' + m[1] + '-' + m[2] + '/') : (location.protocol + '//' + h + ':8080/');\n  }\n  setTimeout(apply, 0);\n})();\n</script>\n<script>\n(function(){\n  function wait(cb){ var t = document.querySelector('.ov'); if (!t) return setTimeout(function(){wait(cb);}, 100); var s = angular.element(t).scope(); if (!s) return setTimeout(function(){wait(cb);}, 100); cb(s); }\n  wait(function(scope){\n    scope.countAlerts = function(ts){ if(!ts) return 0; var n=0; for (var i=0;i<ts.length;i++){ var p=ts[i].level_pct; if (p===undefined||p===null) continue; if (p<20||p>90) n++; } return n; };\n    scope.avgLevel = function(ts){ if(!ts||!ts.length) return 0; var s=0,c=0; for (var i=0;i<ts.length;i++){ var p=ts[i].level_pct; if (p===undefined||p===null) continue; s+=p; c++; } return c?s/c:0; };\n    scope.$applyAsync();\n  });\n})();\n</script>",
     "storeOutMessages": true,
     "fwdInMessages": true,
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 640,
     "y": 120,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "tpl-tank-config",
     "type": "ui_template",
@@ -243,14 +312,18 @@
     "order": 1,
     "width": 24,
     "height": 8,
-    "format": "<style>\n.tcfg{padding:12px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}\n.tcfg-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:10px;flex-wrap:wrap}\n.tcfg-hdr .t{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}\n.tcfg-hdr .h{font-size:11px;color:#6b7280;font-family:monospace}\n.tcfg table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}\n.tcfg th{text-align:left;padding:6px 8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b7280;font-weight:700;border-bottom:1px solid #1f2937}\n.tcfg th.sid{width:110px}\n.tcfg th.sauto{width:32%}\n.tcfg th.sm{width:110px}\n.tcfg td{padding:6px 8px;border-bottom:1px solid #1a1f28;vertical-align:middle}\n.tcfg td.id{font-family:monospace;color:#9aa4b2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.tcfg td.auto{font-size:11px;color:#64748b;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.tcfg td.auto .med{display:inline-block;padding:1px 6px;border-radius:10px;margin-left:6px;font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:#1e293b;color:#94a3b8}\n.tcfg td.auto .med.water{background:#082f49;color:#38bdf8}\n.tcfg td.auto .med.oil{background:#3b1d09;color:#fb923c}\n.tcfg input, .tcfg select{background:#0f1419;color:#e6e6e6;border:1px solid #2a3240;border-radius:6px;padding:6px 8px;font-size:12px;width:100%;font-family:inherit;box-sizing:border-box}\n.tcfg input:focus, .tcfg select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.2)}\n.tcfg input::placeholder{color:#475569}\n.tcfg .actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding-top:12px;margin-top:10px;border-top:1px solid #1f2937}\n.tcfg button{background:#1e293b;color:#cbd5e1;border:1px solid #2a3240;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600;transition:background .15s;font-family:inherit}\n.tcfg button:hover{background:#2a3240;color:#fff}\n.tcfg button.primary{background:#2563eb;color:#fff;border-color:#2563eb}\n.tcfg button.primary:hover{background:#1d4ed8}\n.tcfg .st{font-size:11px;color:#4ade80;font-family:monospace;min-width:80px;text-align:right}\n.tcfg .hint{font-size:11px;color:#6b7280;text-align:center;padding:16px;font-family:monospace}\n</style>\n<div class=\"tcfg\">\n  <div class=\"tcfg-hdr\">\n    <span class=\"t\">Tank Configuration</span>\n    <span class=\"h\">rename + override medium \u2014 applies on next payload</span>\n  </div>\n  <table ng-if=\"rows.length\">\n    <thead>\n      <tr>\n        <th class=\"sid\">ID</th>\n        <th>Display name</th>\n        <th class=\"sm\">Medium</th>\n        <th class=\"sauto\">Auto-detected</th>\n      </tr>\n    </thead>\n    <tbody>\n      <tr ng-repeat=\"r in rows track by r.id\">\n        <td class=\"id\">{{r.id}}</td>\n        <td><input ng-model=\"r.name\" ng-attr-placeholder=\"{{r.auto_name}}\" maxlength=\"32\"/></td>\n        <td>\n          <select ng-model=\"r.medium\">\n            <option value=\"auto\">auto</option>\n            <option value=\"water\">water</option>\n            <option value=\"oil\">oil</option>\n          </select>\n        </td>\n        <td class=\"auto\">{{r.auto_name}}<span class=\"med\" ng-class=\"r.auto_medium\">{{r.auto_medium}}</span></td>\n      </tr>\n    </tbody>\n  </table>\n  <div class=\"hint\" ng-if=\"!rows.length\">no tanks detected yet \u2014 waiting for first payload from analyzer</div>\n  <div class=\"actions\">\n    <span class=\"st\">{{status}}</span>\n    <button ng-click=\"reset()\">Reset all</button>\n    <button class=\"primary\" ng-click=\"save()\">Save overrides</button>\n  </div>\n</div>\n<script>\n(function(scope){\n  scope.rows = scope.rows || [];\n  scope.status = '';\n  scope.$watch('msg', function(m){\n    if (!m || !m.payload || !Array.isArray(m.payload.tanks)) return;\n    var overrides = m.payload.overrides || {};\n    // preserve in-progress edits so a new payload doesn't clobber the user's typing\n    var edited = {};\n    scope.rows.forEach(function(r){ edited[r.id] = { name: r.name, medium: r.medium }; });\n    scope.rows = m.payload.tanks.map(function(t){\n      var ov = overrides[t.id] || {};\n      var e = edited[t.id];\n      return {\n        id: t.id,\n        name:   e ? e.name   : (ov.name   || ''),\n        medium: e ? e.medium : (ov.medium || 'auto'),\n        auto_name:   t.auto_name   || t.name || t.id,\n        auto_medium: t.auto_medium || t.medium || 'unknown'\n      };\n    });\n  });\n  scope.save = function(){\n    var out = {};\n    scope.rows.forEach(function(r){\n      var trimmed = (r.name || '').trim();\n      var hasMedium = r.medium && r.medium !== 'auto';\n      if (trimmed || hasMedium) {\n        out[r.id] = {};\n        if (trimmed)  out[r.id].name   = trimmed;\n        if (hasMedium) out[r.id].medium = r.medium;\n      }\n    });\n    scope.send({ topic: 'config-save', payload: out });\n    scope.status = 'saved \u2713';\n    setTimeout(function(){ scope.status=''; try{scope.$apply();}catch(e){} }, 1800);\n  };\n  scope.reset = function(){\n    scope.rows.forEach(function(r){ r.name=''; r.medium='auto'; });\n    scope.send({ topic: 'config-save', payload: {} });\n    scope.status = 'reset \u2713';\n    setTimeout(function(){ scope.status=''; try{scope.$apply();}catch(e){} }, 1800);\n  };\n})(scope);\n</script>",
+    "format": "<style>\n.tcfg{padding:12px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}\n.tcfg-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:10px;flex-wrap:wrap}\n.tcfg-hdr .t{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}\n.tcfg-hdr .h{font-size:11px;color:#6b7280;font-family:monospace}\n.tcfg table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}\n.tcfg th{text-align:left;padding:6px 8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b7280;font-weight:700;border-bottom:1px solid #1f2937}\n.tcfg th.sid{width:110px}\n.tcfg th.sauto{width:32%}\n.tcfg th.sm{width:110px}\n.tcfg td{padding:6px 8px;border-bottom:1px solid #1a1f28;vertical-align:middle}\n.tcfg td.id{font-family:monospace;color:#9aa4b2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.tcfg td.auto{font-size:11px;color:#64748b;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.tcfg td.auto .med{display:inline-block;padding:1px 6px;border-radius:10px;margin-left:6px;font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:#1e293b;color:#94a3b8}\n.tcfg td.auto .med.water{background:#082f49;color:#38bdf8}\n.tcfg td.auto .med.oil{background:#3b1d09;color:#fb923c}\n.tcfg input, .tcfg select{background:#0f1419;color:#e6e6e6;border:1px solid #2a3240;border-radius:6px;padding:6px 8px;font-size:12px;width:100%;font-family:inherit;box-sizing:border-box}\n.tcfg input:focus, .tcfg select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.2)}\n.tcfg input::placeholder{color:#475569}\n.tcfg .actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding-top:12px;margin-top:10px;border-top:1px solid #1f2937}\n.tcfg button{background:#1e293b;color:#cbd5e1;border:1px solid #2a3240;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600;transition:background .15s;font-family:inherit}\n.tcfg button:hover{background:#2a3240;color:#fff}\n.tcfg button.primary{background:#2563eb;color:#fff;border-color:#2563eb}\n.tcfg button.primary:hover{background:#1d4ed8}\n.tcfg .st{font-size:11px;color:#4ade80;font-family:monospace;min-width:80px;text-align:right}\n.tcfg .hint{font-size:11px;color:#6b7280;text-align:center;padding:16px;font-family:monospace}\n</style>\n<div class=\"tcfg\">\n  <div class=\"tcfg-hdr\">\n    <span class=\"t\">Tank Configuration</span>\n    <span class=\"h\">rename + override medium — applies on next payload</span>\n  </div>\n  <table ng-if=\"rows.length\">\n    <thead>\n      <tr>\n        <th class=\"sid\">ID</th>\n        <th>Display name</th>\n        <th class=\"sm\">Medium</th>\n        <th class=\"sauto\">Auto-detected</th>\n      </tr>\n    </thead>\n    <tbody>\n      <tr ng-repeat=\"r in rows track by r.id\">\n        <td class=\"id\">{{r.id}}</td>\n        <td><input ng-model=\"r.name\" ng-attr-placeholder=\"{{r.auto_name}}\" maxlength=\"32\"/></td>\n        <td>\n          <select ng-model=\"r.medium\">\n            <option value=\"auto\">auto</option>\n            <option value=\"water\">water</option>\n            <option value=\"oil\">oil</option>\n          </select>\n        </td>\n        <td class=\"auto\">{{r.auto_name}}<span class=\"med\" ng-class=\"r.auto_medium\">{{r.auto_medium}}</span></td>\n      </tr>\n    </tbody>\n  </table>\n  <div class=\"hint\" ng-if=\"!rows.length\">no tanks detected yet — waiting for first payload from analyzer</div>\n  <div class=\"actions\">\n    <span class=\"st\">{{status}}</span>\n    <button ng-click=\"reset()\">Reset all</button>\n    <button class=\"primary\" ng-click=\"save()\">Save overrides</button>\n  </div>\n</div>\n<script>\n(function(scope){\n  scope.rows = scope.rows || [];\n  scope.status = '';\n  scope.$watch('msg', function(m){\n    if (!m || !m.payload || !Array.isArray(m.payload.tanks)) return;\n    var overrides = m.payload.overrides || {};\n    // preserve in-progress edits so a new payload doesn't clobber the user's typing\n    var edited = {};\n    scope.rows.forEach(function(r){ edited[r.id] = { name: r.name, medium: r.medium }; });\n    scope.rows = m.payload.tanks.map(function(t){\n      var ov = overrides[t.id] || {};\n      var e = edited[t.id];\n      return {\n        id: t.id,\n        name:   e ? e.name   : (ov.name   || ''),\n        medium: e ? e.medium : (ov.medium || 'auto'),\n        auto_name:   t.auto_name   || t.name || t.id,\n        auto_medium: t.auto_medium || t.medium || 'unknown'\n      };\n    });\n  });\n  scope.save = function(){\n    var out = {};\n    scope.rows.forEach(function(r){\n      var trimmed = (r.name || '').trim();\n      var hasMedium = r.medium && r.medium !== 'auto';\n      if (trimmed || hasMedium) {\n        out[r.id] = {};\n        if (trimmed)  out[r.id].name   = trimmed;\n        if (hasMedium) out[r.id].medium = r.medium;\n      }\n    });\n    scope.send({ topic: 'config-save', payload: out });\n    scope.status = 'saved ✓';\n    setTimeout(function(){ scope.status=''; try{scope.$apply();}catch(e){} }, 1800);\n  };\n  scope.reset = function(){\n    scope.rows.forEach(function(r){ r.name=''; r.medium='auto'; });\n    scope.send({ topic: 'config-save', payload: {} });\n    scope.status = 'reset ✓';\n    setTimeout(function(){ scope.status=''; try{scope.$apply();}catch(e){} }, 1800);\n  };\n})(scope);\n</script>",
     "storeOutMessages": true,
     "fwdInMessages": true,
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 640,
     "y": 180,
-    "wires": [["save-overrides"]]
+    "wires": [
+      [
+        "save-overrides"
+      ]
+    ]
   },
   {
     "id": "save-overrides",
@@ -261,9 +334,10 @@
     "outputs": 1,
     "x": 940,
     "y": 180,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "tpl-live-view",
     "type": "ui_template",
@@ -273,16 +347,17 @@
     "order": 1,
     "width": 14,
     "height": 9,
-    "format": "<style>\n.lv{padding:6px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100%;display:flex;flex-direction:column}\n.lv .hdr{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-bottom:6px;flex:0 0 auto}\n.lv .hdr .t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}\n.lv .hdr .tools{display:flex;gap:6px}\n.lv .hdr button{background:#1e293b;color:#cbd5e1;border:1px solid #2a3240;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600;transition:background .15s}\n.lv .hdr button:hover{background:#2a3240;color:#fff}\n.lv .wrap{position:relative;border-radius:12px;overflow:hidden;background:#000;border:1px solid #2a3240;flex:1 1 auto;display:flex;align-items:center;justify-content:center;min-height:260px}\n.lv .wrap img{width:100%;height:100%;display:block;object-fit:contain;max-height:100%}\n.lv .ph{color:#6b7280;font-family:monospace;font-size:12px;padding:30px;text-align:center}\n.lv .badge{position:absolute;top:10px;right:10px;padding:4px 10px;border-radius:10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;background:rgba(15,20,25,0.75);color:#4ade80;border:1px solid rgba(74,222,128,0.3)}\n.lv .badge .pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:5px;animation:lvp 1.2s ease-in-out infinite}\n.lv .badge.off{color:#f87171;border-color:rgba(248,113,113,0.3)}\n.lv .badge.off .pulse{background:#f87171;animation:none}\n.lv .tsb{position:absolute;top:10px;left:10px;padding:5px 10px;border-radius:10px;font-family:monospace;font-weight:700;letter-spacing:.04em;line-height:1.2;background:rgba(15,20,25,0.82);border:1px solid rgba(42,50,64,0.9);display:flex;flex-direction:column;gap:1px;min-width:88px;text-align:left}\n.lv .tsb .d{color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.08em}\n.lv .tsb .t{color:#e6e6e6;font-size:13px;font-variant-numeric:tabular-nums}\n@keyframes lvp{0%,100%{opacity:1}50%{opacity:0.35}}\n</style>\n<div class=\"lv\">\n  <div class=\"hdr\">\n    <span class=\"t\">Live Thermal Stream</span>\n    <div class=\"tools\">\n      <button id=\"lv-reload\" type=\"button\">Reload</button>\n    </div>\n  </div>\n  <div class=\"wrap\">\n    <div class=\"ph\" id=\"lv-ph\">connecting to thermal analyzer&hellip;</div>\n    <img id=\"lv-img\" alt=\"thermal stream\" style=\"display:none\"/>\n    <div class=\"tsb\" id=\"lv-ts\"><span class=\"d\">----/--/--</span><span class=\"t\">--:--:--</span></div>\n    <span class=\"badge\" id=\"lv-badge\"><span class=\"pulse\"></span>LIVE</span>\n  </div>\n</div>\n<script>\n(function(){\n  function deriveBase(){\n    var h = location.hostname;\n    var m = h.match(/^p1880-(n-[a-z0-9-]+)-(.*)$/i);\n    if (m) return location.protocol + '//p8080-' + m[1] + '-' + m[2];\n    return location.protocol + '//' + h + ':8080';\n  }\n  function boot(){\n    var img = document.getElementById('lv-img');\n    var ph  = document.getElementById('lv-ph');\n    var bg  = document.getElementById('lv-badge');\n    var btn = document.getElementById('lv-reload');\n    if (!img) return setTimeout(boot, 100);\n    function load(){\n      ph.style.display='block';\n      img.style.display='none';\n      ph.textContent='connecting to thermal analyzer\u2026';\n      bg.className='badge';\n      bg.innerHTML='<span class=\"pulse\"></span>LIVE';\n      img.onload  = function(){ ph.style.display='none'; img.style.display='block'; };\n      img.onerror = function(){ ph.style.display='block'; ph.textContent='stream unreachable \u2014 is the operator console running?'; img.style.display='none'; bg.className='badge off'; bg.innerHTML='<span class=\"pulse\"></span>OFFLINE'; };\n      img.src = deriveBase() + '/stream.mjpg?ts=' + Date.now();\n    }\n    btn.onclick = load;\n    load();\n    // top-left date+time badge, ticks once per second\n    function pad(n){ return String(n).padStart(2, '0'); }\n    function tick(){\n      var el = document.getElementById('lv-ts');\n      if (!el) return;\n      var d = new Date();\n      var dd = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());\n      var tt = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());\n      el.innerHTML = '<span class=\"d\">' + dd + '</span><span class=\"t\">' + tt + '</span>';\n    }\n    tick();\n    if (window._lvTick) clearInterval(window._lvTick);\n    window._lvTick = setInterval(tick, 1000);\n  }\n  setTimeout(boot, 0);\n})();\n</script>",
+    "format": "<style>\n.lv{padding:6px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100%;display:flex;flex-direction:column}\n.lv .hdr{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-bottom:6px;flex:0 0 auto}\n.lv .hdr .t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}\n.lv .hdr .tools{display:flex;gap:6px}\n.lv .hdr button{background:#1e293b;color:#cbd5e1;border:1px solid #2a3240;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600;transition:background .15s}\n.lv .hdr button:hover{background:#2a3240;color:#fff}\n.lv .wrap{position:relative;border-radius:12px;overflow:hidden;background:#000;border:1px solid #2a3240;flex:1 1 auto;display:flex;align-items:center;justify-content:center;min-height:260px}\n.lv .wrap img{width:100%;height:100%;display:block;object-fit:contain;max-height:100%}\n.lv .ph{color:#6b7280;font-family:monospace;font-size:12px;padding:30px;text-align:center}\n.lv .badge{position:absolute;top:10px;right:10px;padding:4px 10px;border-radius:10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;background:rgba(15,20,25,0.75);color:#4ade80;border:1px solid rgba(74,222,128,0.3)}\n.lv .badge .pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:5px;animation:lvp 1.2s ease-in-out infinite}\n.lv .badge.off{color:#f87171;border-color:rgba(248,113,113,0.3)}\n.lv .badge.off .pulse{background:#f87171;animation:none}\n@keyframes lvp{0%,100%{opacity:1}50%{opacity:0.35}}\n</style>\n<div class=\"lv\">\n  <div class=\"hdr\">\n    <span class=\"t\">Live Thermal Stream</span>\n    <div class=\"tools\">\n      <button id=\"lv-reload\" type=\"button\">Reload</button>\n    </div>\n  </div>\n  <div class=\"wrap\">\n    <div class=\"ph\" id=\"lv-ph\">connecting to thermal analyzer&hellip;</div>\n    <img id=\"lv-img\" alt=\"thermal stream\" style=\"display:none\"/>\n    <span class=\"badge\" id=\"lv-badge\"><span class=\"pulse\"></span>LIVE</span>\n  </div>\n</div>\n<script>\n(function(){\n  function deriveBase(){\n    var h = location.hostname;\n    var m = h.match(/^p1880-(n-[a-z0-9-]+)-(.*)$/i);\n    if (m) return location.protocol + '//p8080-' + m[1] + '-' + m[2];\n    return location.protocol + '//' + h + ':8080';\n  }\n  function boot(){\n    var img = document.getElementById('lv-img');\n    var ph  = document.getElementById('lv-ph');\n    var bg  = document.getElementById('lv-badge');\n    var btn = document.getElementById('lv-reload');\n    if (!img) return setTimeout(boot, 100);\n    function load(){\n      ph.style.display='block';\n      img.style.display='none';\n      ph.textContent='connecting to thermal analyzer…';\n      bg.className='badge';\n      bg.innerHTML='<span class=\"pulse\"></span>LIVE';\n      img.onload  = function(){ ph.style.display='none'; img.style.display='block'; };\n      img.onerror = function(){ ph.style.display='block'; ph.textContent='stream unreachable — is the operator console running?'; img.style.display='none'; bg.className='badge off'; bg.innerHTML='<span class=\"pulse\"></span>OFFLINE'; };\n      img.src = deriveBase() + '/stream.mjpg?ts=' + Date.now();\n    }\n    btn.onclick = load;\n    load();\n  }\n  setTimeout(boot, 0);\n})();\n</script>",
     "storeOutMessages": false,
     "fwdInMessages": false,
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 640,
     "y": 240,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "tpl-tank-cards",
     "type": "ui_template",
@@ -292,16 +367,17 @@
     "order": 1,
     "width": 10,
     "height": 9,
-    "format": "<style>\n.tg{display:flex;flex-direction:column;gap:10px;padding:6px;height:100%;overflow-y:auto}\n.tc{background:#1c222b;border:1px solid #2a3240;border-radius:12px;padding:12px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;transition:border-color .2s;flex:0 0 auto}\n.tc.hi{border-color:#22c55e}\n.tc.lo{border-color:#f59e0b}\n.tc.al{border-color:#ef4444;box-shadow:0 0 0 1px #ef4444 inset}\n.tc h4{margin:0 0 8px 0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px}\n.tc h4 .nm{font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.tc h4 .med{font-size:10px;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;background:#1e293b;color:#94a3b8;flex:0 0 auto}\n.tc h4 .med.water{background:#082f49;color:#38bdf8}\n.tc h4 .med.oil{background:#3b1d09;color:#fb923c}\n.tc .pri{font-size:28px;font-weight:700;letter-spacing:-0.03em;line-height:1}\n.tc .pri.hi{color:#4ade80}\n.tc .pri.lo{color:#fbbf24}\n.tc .pri.al{color:#f87171}\n.tc .sub{font-size:10px;color:#94a3b8;margin-top:3px;font-family:monospace}\n.tc .bar{height:5px;background:#0f1419;border-radius:3px;overflow:hidden;margin:8px 0 4px 0}\n.tc .bar .fill{height:100%;background:linear-gradient(90deg,#22c55e,#84cc16);transition:width .3s}\n.tc .row{display:flex;justify-content:space-between;font-size:10px;color:#9aa4b2;margin-top:2px;font-family:monospace}\n.tc .row .k{color:#6b7280}\n.tc .rate{display:flex;align-items:baseline;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #1f2937;font-size:11px}\n.tc .rate .v{font-weight:700;font-size:13px}\n.tc .rate .v.up{color:#4ade80}\n.tc .rate .v.dn{color:#fbbf24}\n.tc .rate .v.st{color:#94a3b8}\n.tc .chip{display:inline-block;padding:1px 6px;border-radius:10px;font-size:9px;background:#0f1419;color:#9aa4b2;font-family:monospace}\n.tc .chip.hi{background:#052e16;color:#4ade80}\n.tc .chip.lo{background:#2a1f00;color:#fbbf24}\n.empty{padding:30px;text-align:center;color:#64748b;font-family:sans-serif;font-size:12px}\n</style>\n<div class=\"tg\" ng-if=\"msg.payload && msg.payload.tanks && msg.payload.tanks.length\">\n  <div class=\"tc\"\n       ng-repeat=\"t in msg.payload.tanks track by (t.id || t.name || $index)\"\n       ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high', al: t.level_pct<20 || t.level_pct>90 }\">\n    <h4>\n      <span class=\"nm\">{{t.name || t.id}}</span>\n      <span class=\"med\" ng-class=\"t.medium\">{{t.medium || 'unknown'}}</span>\n    </h4>\n    <div class=\"pri\" ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high', al: t.level_pct<20 || t.level_pct>90 }\">\n      <span ng-if=\"t.reading && t.reading.level_ft !== undefined && t.reading.level_ft !== null\">{{t.reading.level_ft | number:2}} ft</span>\n      <span ng-if=\"!t.reading || t.reading.level_ft === undefined || t.reading.level_ft === null\">{{t.level_pct | number:1}}%</span>\n    </div>\n    <div class=\"sub\" ng-if=\"t.geometry && t.geometry.height_ft\">of {{t.geometry.height_ft | number:1}} ft &middot; \u2300 {{t.geometry.diameter_ft | number:1}} ft</div>\n    <div class=\"bar\"><div class=\"fill\" ng-style=\"{ width: (t.level_pct || 0) + '%' }\"></div></div>\n    <div class=\"row\"><span class=\"k\">level %</span><span>{{t.level_pct | number:1}}%</span></div>\n    <div class=\"row\" ng-if=\"t.reading && t.reading.volume_bbl !== undefined && t.reading.volume_bbl !== null\"><span class=\"k\">volume</span><span>{{t.reading.volume_bbl | number:0}} bbl</span></div>\n    <div class=\"row\" ng-if=\"t.reading && t.reading.ullage_ft !== undefined && t.reading.ullage_ft !== null\"><span class=\"k\">ullage</span><span>{{t.reading.ullage_ft | number:2}} ft</span></div>\n    <div class=\"row\"><span class=\"k\">temp avg</span><span>{{t.temp_avg | number:1}}\u00b0C</span></div>\n    <div class=\"row\"><span class=\"k\">confidence</span><span class=\"chip\" ng-class=\"{ hi: t.confidence==='high', lo: t.confidence!=='high' }\">{{t.confidence}}<span ng-if=\"t.medium_confidence !== undefined\"> &middot; m{{t.medium_confidence | number:2}}</span></span></div>\n    <div class=\"rate\" ng-if=\"t.reading && t.reading.fill_rate_bbl_h !== undefined && t.reading.fill_rate_bbl_h !== null\">\n      <span class=\"v\" ng-class=\"{ up: t.reading.fill_rate_bbl_h > 0.5, dn: t.reading.fill_rate_bbl_h < -0.5, st: t.reading.fill_rate_bbl_h >= -0.5 && t.reading.fill_rate_bbl_h <= 0.5 }\">\n        <span ng-if=\"t.reading.fill_rate_bbl_h > 0.5\">\u25b2</span><span ng-if=\"t.reading.fill_rate_bbl_h < -0.5\">\u25bc</span><span ng-if=\"t.reading.fill_rate_bbl_h >= -0.5 && t.reading.fill_rate_bbl_h <= 0.5\">\u2500</span>\n        {{t.reading.fill_rate_bbl_h | number:1}} bbl/h\n      </span>\n    </div>\n  </div>\n</div>\n<div class=\"empty\" ng-if=\"!msg.payload || !msg.payload.tanks || !msg.payload.tanks.length\">\n  Waiting for first payload&hellip;\n</div>",
+    "format": "<style>\n.tg{display:flex;flex-direction:column;gap:10px;padding:6px;height:100%;overflow-y:auto}\n.tc{background:#1c222b;border:1px solid #2a3240;border-radius:12px;padding:12px;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;transition:border-color .2s;flex:0 0 auto}\n.tc.hi{border-color:#22c55e}\n.tc.lo{border-color:#f59e0b}\n.tc.al{border-color:#ef4444;box-shadow:0 0 0 1px #ef4444 inset}\n.tc h4{margin:0 0 8px 0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px}\n.tc h4 .nm{font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.tc h4 .med{font-size:10px;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;background:#1e293b;color:#94a3b8;flex:0 0 auto}\n.tc h4 .med.water{background:#082f49;color:#38bdf8}\n.tc h4 .med.oil{background:#3b1d09;color:#fb923c}\n.tc .pri{font-size:28px;font-weight:700;letter-spacing:-0.03em;line-height:1}\n.tc .pri.hi{color:#4ade80}\n.tc .pri.lo{color:#fbbf24}\n.tc .pri.al{color:#f87171}\n.tc .sub{font-size:10px;color:#94a3b8;margin-top:3px;font-family:monospace}\n.tc .bar{height:5px;background:#0f1419;border-radius:3px;overflow:hidden;margin:8px 0 4px 0}\n.tc .bar .fill{height:100%;background:linear-gradient(90deg,#22c55e,#84cc16);transition:width .3s}\n.tc .row{display:flex;justify-content:space-between;font-size:10px;color:#9aa4b2;margin-top:2px;font-family:monospace}\n.tc .row .k{color:#6b7280}\n.tc .rate{display:flex;align-items:baseline;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #1f2937;font-size:11px}\n.tc .rate .v{font-weight:700;font-size:13px}\n.tc .rate .v.up{color:#4ade80}\n.tc .rate .v.dn{color:#fbbf24}\n.tc .rate .v.st{color:#94a3b8}\n.tc .chip{display:inline-block;padding:1px 6px;border-radius:10px;font-size:9px;background:#0f1419;color:#9aa4b2;font-family:monospace}\n.tc .chip.hi{background:#052e16;color:#4ade80}\n.tc .chip.lo{background:#2a1f00;color:#fbbf24}\n.empty{padding:30px;text-align:center;color:#64748b;font-family:sans-serif;font-size:12px}\n</style>\n<div class=\"tg\" ng-if=\"msg.payload && msg.payload.tanks && msg.payload.tanks.length\">\n  <div class=\"tc\"\n       ng-repeat=\"t in msg.payload.tanks track by (t.id || t.name || $index)\"\n       ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high', al: t.level_pct<20 || t.level_pct>90 }\">\n    <h4>\n      <span class=\"nm\">{{t.name || t.id}}</span>\n      <span class=\"med\" ng-class=\"t.medium\">{{t.medium || 'unknown'}}</span>\n    </h4>\n    <div class=\"pri\" ng-class=\"{ hi: t.confidence==='high' && t.level_pct>=20 && t.level_pct<=90, lo: t.confidence!=='high', al: t.level_pct<20 || t.level_pct>90 }\">\n      <span ng-if=\"t.reading && t.reading.level_ft !== undefined && t.reading.level_ft !== null\">{{t.reading.level_ft | number:2}} ft</span>\n      <span ng-if=\"!t.reading || t.reading.level_ft === undefined || t.reading.level_ft === null\">{{t.level_pct | number:1}}%</span>\n    </div>\n    <div class=\"sub\" ng-if=\"t.geometry && t.geometry.height_ft\">of {{t.geometry.height_ft | number:1}} ft &middot; ⌀ {{t.geometry.diameter_ft | number:1}} ft</div>\n    <div class=\"bar\"><div class=\"fill\" ng-style=\"{ width: (t.level_pct || 0) + '%' }\"></div></div>\n    <div class=\"row\"><span class=\"k\">level %</span><span>{{t.level_pct | number:1}}%</span></div>\n    <div class=\"row\" ng-if=\"t.reading && t.reading.volume_bbl !== undefined && t.reading.volume_bbl !== null\"><span class=\"k\">volume</span><span>{{t.reading.volume_bbl | number:0}} bbl</span></div>\n    <div class=\"row\" ng-if=\"t.reading && t.reading.ullage_ft !== undefined && t.reading.ullage_ft !== null\"><span class=\"k\">ullage</span><span>{{t.reading.ullage_ft | number:2}} ft</span></div>\n    <div class=\"row\"><span class=\"k\">temp avg</span><span>{{t.temp_avg | number:1}}°C</span></div>\n    <div class=\"row\"><span class=\"k\">confidence</span><span class=\"chip\" ng-class=\"{ hi: t.confidence==='high', lo: t.confidence!=='high' }\">{{t.confidence}}<span ng-if=\"t.medium_confidence !== undefined\"> &middot; m{{t.medium_confidence | number:2}}</span></span></div>\n    <div class=\"rate\" ng-if=\"t.reading && t.reading.fill_rate_bbl_h !== undefined && t.reading.fill_rate_bbl_h !== null\">\n      <span class=\"v\" ng-class=\"{ up: t.reading.fill_rate_bbl_h > 0.5, dn: t.reading.fill_rate_bbl_h < -0.5, st: t.reading.fill_rate_bbl_h >= -0.5 && t.reading.fill_rate_bbl_h <= 0.5 }\">\n        <span ng-if=\"t.reading.fill_rate_bbl_h > 0.5\">▲</span><span ng-if=\"t.reading.fill_rate_bbl_h < -0.5\">▼</span><span ng-if=\"t.reading.fill_rate_bbl_h >= -0.5 && t.reading.fill_rate_bbl_h <= 0.5\">─</span>\n        {{t.reading.fill_rate_bbl_h | number:1}} bbl/h\n      </span>\n    </div>\n  </div>\n</div>\n<div class=\"empty\" ng-if=\"!msg.payload || !msg.payload.tanks || !msg.payload.tanks.length\">\n  Waiting for first payload&hellip;\n</div>",
     "storeOutMessages": true,
     "fwdInMessages": true,
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 640,
     "y": 300,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "chart-level",
     "type": "ui_chart",
@@ -316,7 +392,7 @@
     "legend": "true",
     "xformat": "HH:mm",
     "interpolate": "linear",
-    "nodata": "waiting for high-confidence samples\u2026",
+    "nodata": "waiting for high-confidence samples…",
     "dot": false,
     "ymin": "0",
     "ymax": "100",
@@ -326,7 +402,9 @@
     "useOldStyle": false,
     "x": 640,
     "y": 360,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
   {
     "id": "chart-temp",
@@ -337,12 +415,12 @@
     "order": 2,
     "width": 24,
     "height": 5,
-    "label": "Avg temperature (\u00b0C, 24 h)",
+    "label": "Avg temperature (°C, 24 h)",
     "chartType": "line",
     "legend": "true",
     "xformat": "HH:mm",
     "interpolate": "linear",
-    "nodata": "waiting for data\u2026",
+    "nodata": "waiting for data…",
     "ymin": "",
     "ymax": "",
     "removeOlder": "24",
@@ -351,9 +429,10 @@
     "useOldStyle": false,
     "x": 640,
     "y": 420,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "alert-guard",
     "type": "function",
@@ -363,7 +442,13 @@
     "outputs": 1,
     "x": 370,
     "y": 480,
-    "wires": [["toast-alert", "tpl-alerts", "debug-alert"]]
+    "wires": [
+      [
+        "toast-alert",
+        "tpl-alerts",
+        "debug-alert"
+      ]
+    ]
   },
   {
     "id": "toast-alert",
@@ -410,16 +495,17 @@
     "order": 1,
     "width": 24,
     "height": 5,
-    "format": "<style>\n.al{height:100%;overflow-y:auto;padding:6px;font-family:monospace;font-size:12px;color:#e6e6e6}\n.al .row{display:grid;grid-template-columns:88px 70px 1fr;gap:10px;padding:6px 8px;border-bottom:1px solid #1f2937;align-items:center}\n.al .ts{color:#6b7280}\n.al .tag{padding:2px 8px;border-radius:10px;text-align:center;font-weight:700;font-size:10px;letter-spacing:.04em}\n.al .tag.LOW{background:#2a1f00;color:#fbbf24}\n.al .tag.HIGH{background:#3f1d1d;color:#fca5a5}\n.al .tag.OK{background:#052e16;color:#4ade80}\n.al .msg{color:#cbd5e1}\n.al .empty{color:#64748b;text-align:center;padding:14px;font-family:sans-serif}\n</style>\n<div class=\"al\">\n  <div class=\"row\" ng-repeat=\"a in alerts | orderBy:'-ts' | limitTo: 40 track by $index\">\n    <span class=\"ts\">{{a.ts | date:'HH:mm:ss'}}</span>\n    <span class=\"tag\" ng-class=\"a.state\">{{a.state}}</span>\n    <span class=\"msg\">{{a.payload}}</span>\n  </div>\n  <div class=\"empty\" ng-if=\"!alerts || !alerts.length\">no alerts yet \u2014 thresholds are 20% / 90%</div>\n</div>\n<script>\n(function(scope){\n  scope.alerts = scope.alerts || [];\n  scope.$watch('msg', function(m){\n    if (!m) return;\n    if (Array.isArray(m.payload_history)) {\n      // alert-guard sent the canonical history alongside the event\n      scope.alerts = m.payload_history.slice();\n    } else if (m.payload) {\n      scope.alerts.push({ ts: Date.now(), state: m._state || 'OK', payload: m.payload });\n      if (scope.alerts.length > 200) scope.alerts.splice(0, scope.alerts.length - 200);\n    }\n  });\n})(scope);\n</script>",
+    "format": "<style>\n.al{height:100%;overflow-y:auto;padding:6px;font-family:monospace;font-size:12px;color:#e6e6e6}\n.al .row{display:grid;grid-template-columns:88px 70px 1fr;gap:10px;padding:6px 8px;border-bottom:1px solid #1f2937;align-items:center}\n.al .ts{color:#6b7280}\n.al .tag{padding:2px 8px;border-radius:10px;text-align:center;font-weight:700;font-size:10px;letter-spacing:.04em}\n.al .tag.LOW{background:#2a1f00;color:#fbbf24}\n.al .tag.HIGH{background:#3f1d1d;color:#fca5a5}\n.al .tag.OK{background:#052e16;color:#4ade80}\n.al .msg{color:#cbd5e1}\n.al .empty{color:#64748b;text-align:center;padding:14px;font-family:sans-serif}\n</style>\n<div class=\"al\">\n  <div class=\"row\" ng-repeat=\"a in alerts | orderBy:'-ts' | limitTo: 40 track by $index\">\n    <span class=\"ts\">{{a.ts | date:'HH:mm:ss'}}</span>\n    <span class=\"tag\" ng-class=\"a.state\">{{a.state}}</span>\n    <span class=\"msg\">{{a.payload}}</span>\n  </div>\n  <div class=\"empty\" ng-if=\"!alerts || !alerts.length\">no alerts yet — thresholds are 20% / 90%</div>\n</div>\n<script>\n(function(scope){\n  scope.alerts = scope.alerts || [];\n  scope.$watch('msg', function(m){\n    if (!m) return;\n    if (Array.isArray(m.payload_history)) {\n      // alert-guard sent the canonical history alongside the event\n      scope.alerts = m.payload_history.slice();\n    } else if (m.payload) {\n      scope.alerts.push({ ts: Date.now(), state: m._state || 'OK', payload: m.payload });\n      if (scope.alerts.length > 200) scope.alerts.splice(0, scope.alerts.length - 200);\n    }\n  });\n})(scope);\n</script>",
     "storeOutMessages": true,
     "fwdInMessages": true,
     "resendOnRefresh": true,
     "templateScope": "local",
     "x": 600,
     "y": 580,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
-
   {
     "id": "events-text",
     "type": "ui_text",

@@ -103,6 +103,7 @@ stream:
     temp_scale: true       # colorbar with min/max °C
     fps_counter: true
     tank_labels: true
+    timestamp: true        # date+time badge burned into top-left corner
   # Video recording destination (inside the container; /app/data is mounted to host)
   recording_dir: /app/data/recordings
   snapshot_dir:  /app/data/snapshots

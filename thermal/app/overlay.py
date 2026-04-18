@@ -1,12 +1,51 @@
-"""Overlay drawing (ROIs, min/max markers, temp scale, FPS, labels)."""
+"""Overlay drawing (ROIs, min/max markers, temp scale, FPS, labels, timestamp)."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import cv2
 import numpy as np
 
 
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
+_MONO = cv2.FONT_HERSHEY_DUPLEX
+
+
+def _draw_timestamp_badge(img, *, x: int = 8, y: int = 8) -> None:
+    """Burn a date+time badge into the top-left corner (mutates `img`)."""
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S")
+
+    # Scale font to frame size so it reads cleanly at 512x384 (default 2x upscale).
+    H, W = img.shape[:2]
+    fs = max(0.40, min(0.62, W / 900.0))
+    th = 1
+
+    (dw, dh), _ = cv2.getTextSize(date_str, _MONO, fs, th)
+    (tw, tH), _ = cv2.getTextSize(time_str, _MONO, fs, th)
+    pad_x, pad_y, gap = 8, 6, 4
+    box_w = max(dw, tw) + pad_x * 2
+    box_h = dh + tH + gap + pad_y * 2
+
+    # Translucent dark background
+    bg = img[y : y + box_h, x : x + box_w].copy()
+    cv2.rectangle(bg, (0, 0), (box_w, box_h), (14, 14, 18), -1)
+    cv2.addWeighted(bg, 0.72, img[y : y + box_h, x : x + box_w], 0.28, 0,
+                    img[y : y + box_h, x : x + box_w])
+    # Left accent bar (blue)
+    cv2.rectangle(img, (x, y), (x + 3, y + box_h), (220, 140, 40), -1)
+    # Outline
+    cv2.rectangle(img, (x, y), (x + box_w, y + box_h), (60, 60, 70), 1)
+
+    # Text (date dimmer, time brighter)
+    date_y = y + pad_y + dh
+    time_y = date_y + gap + tH
+    cv2.putText(img, date_str, (x + pad_x, date_y),
+                _MONO, fs, (185, 185, 195), th, cv2.LINE_AA)
+    cv2.putText(img, time_str, (x + pad_x, time_y),
+                _MONO, fs, (255, 255, 255), th, cv2.LINE_AA)
 
 
 def _fmt_temp(t: float, unit: str = "C") -> str:
@@ -101,10 +140,14 @@ def draw_frame_overlay(img, *, tanks, results, tmin, tmax, hot, cold,
                     (bar_x - 50, bar_y + bar_h + 2), _FONT, 0.4,
                     (255, 255, 255), 1, cv2.LINE_AA)
 
-    # FPS counter (top-left)
+    # Timestamp badge (top-left) — burned in so it's visible in recordings, snapshots, MJPEG
+    if overlay_cfg.get("timestamp", True):
+        _draw_timestamp_badge(out, x=8, y=8)
+
+    # FPS counter (bottom-left so it doesn't fight the timestamp)
     if overlay_cfg.get("fps_counter"):
         cv2.putText(out, f"{fps_actual:.0f} fps",
-                    (6, 14), _FONT, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+                    (8, H - 8), _FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
     return out
 
