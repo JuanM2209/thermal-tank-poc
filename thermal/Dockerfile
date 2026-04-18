@@ -43,9 +43,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Runtime shared libs (all the piwheels / opencv-headless indirect deps):
 #   libgl1 / libglib2.0-0      -> opencv-python-headless
-#   libjpeg62-turbo            -> opencv imread/imencode JPEG (libjpeg.so.62)
-#   libpng16-16 / libtiff6 / libwebp7  -> opencv image codecs
+#   libjpeg62-turbo            -> JPEG codec
+#   libpng16-16 / libtiff6 / libwebp7 / libopenjp2-7  -> image codecs
 #   libopenblas0 / libgomp1    -> piwheels numpy (OpenBLAS + OpenMP)
+#   libav* / libswscale6       -> video I/O (cv2.VideoWriter fallbacks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
@@ -53,12 +54,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpng16-16 \
         libtiff6 \
         libwebp7 \
+        libopenjp2-7 \
         libopenblas0 \
+        libatlas3-base \
+        libgfortran5 \
         libgomp1 \
+        libavcodec59 \
+        libavformat59 \
+        libavutil57 \
+        libswscale6 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 COPY --from=builder /opt/venv /opt/venv
+
+# Self-test: fail the build if cv2 / numpy cannot actually be imported here.
+# Catches missing shared libs NOW instead of at container-start time on N-1065.
+RUN python -c "import numpy, cv2; print('numpy', numpy.__version__, 'cv2', cv2.__version__)"
 
 WORKDIR /app
 COPY app/ /app/
