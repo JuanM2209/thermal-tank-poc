@@ -127,5 +127,21 @@ class HttpPublisher:
             if len(self._queue) < self._max_queue:
                 self._queue.append(payload)
 
+    def push_alert(self, alert: dict) -> None:
+        """Queue an operator-console-flavored alert for Node-RED.
+
+        The payload uses kind="alert" so Node-RED can route it alongside
+        normal tank telemetry without special-casing the URL.
+        """
+        payload = {
+            "ts": int(time.time() * 1000),
+            "site_id": self.site_id,
+            "kind": "alert",
+            "alert": alert,
+        }
+        with self._lock:
+            if len(self._queue) < self._max_queue:
+                self._queue.append(payload)
+
     def stop(self) -> None:
         self._running = False

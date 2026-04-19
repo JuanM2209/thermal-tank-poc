@@ -119,6 +119,31 @@ INDEX_HTML = r"""<!doctype html>
     details summary{cursor:pointer;list-style:none}
     details summary::-webkit-details-marker{display:none}
     .arrow-up{color:#4ade80}.arrow-dn{color:#fbbf24}.arrow-zero{color:#64748b}
+
+    /* Alerts floating panel (bottom-right of viewport) */
+    .alerts-panel-fixed{position:fixed;right:14px;bottom:46px;z-index:60;width:330px;max-height:320px;background:rgba(5,7,10,.95);border:1px solid #334155;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;backdrop-filter:blur(8px)}
+    .alerts-panel-fixed.collapsed{height:36px;overflow:hidden}
+    .alerts-panel-fixed .ap-head{display:flex;align-items:center;justify-content:space-between;padding:.45rem .75rem;border-bottom:1px solid #1f2630;cursor:pointer;user-select:none}
+    .alerts-panel-fixed .ap-head .title{font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:#cbd5e1;font-weight:700}
+    .alerts-panel-fixed .ap-head .badge{background:#b91c1c;color:#fff;font-size:.6rem;padding:1px 6px;border-radius:999px;font-weight:700;min-width:16px;text-align:center}
+    .alerts-panel-fixed .ap-body{flex:1;overflow-y:auto;padding:.5rem}
+    .alert-item{background:rgba(15,23,42,.7);border:1px solid #1f2630;border-radius:8px;padding:6px 8px;margin-bottom:5px;font-size:.72rem}
+    .alert-item.al{border-color:#991b1b;background:rgba(60,10,10,.5)}
+    .alert-item.warn{border-color:#b45309}
+    .alert-item .meta{display:flex;justify-content:space-between;margin-bottom:3px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:.6rem}
+    .alert-item .meta .kind{font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8}
+    .alert-item.al .meta .kind{color:#f87171}
+    .alert-item.warn .meta .kind{color:#fbbf24}
+    .alert-item .meta .time{color:#64748b}
+    .alert-item .msg{color:#e2e8f0;margin-bottom:4px}
+    .alert-item .acts{display:flex;gap:4px;align-items:center}
+    .alert-item .acts .btn{padding:.12rem .4rem;font-size:.6rem}
+    .alert-item .pushed{font-size:.6rem;color:#34d399;letter-spacing:.1em;text-transform:uppercase}
+
+    /* "+ Tank" tool button */
+    .tool-bar button.add{background:#065f46;color:#d1fae5;width:auto;padding:0 .55rem;font-size:.7rem;letter-spacing:.04em}
+    .tool-bar button.add:hover{background:#047857;color:#fff}
+    .tool-bar button.add.active{background:#10b981;color:#fff}
   </style>
 </head>
 <body class="h-full grid-bg">
@@ -141,10 +166,6 @@ INDEX_HTML = r"""<!doctype html>
     <span class="pill flex items-center gap-2" x-show="!config?.calibration?.range_locked">
       <span class="dot warn"></span>uncalibrated
     </span>
-    <div class="seg" role="tablist">
-      <button :class="unit==='ft'?'active':''" @click="setUnit('ft')">ft</button>
-      <button :class="unit==='in'?'active':''" @click="setUnit('in')">in</button>
-    </div>
     <button class="btn primary" @click="openDetectModal()">Auto-detect</button>
     <button class="btn success" @click="runCalibrate()" :disabled="calibrating" x-text="calibrating?'Calibrating...':'Calibrate'"></button>
     <button class="btn" @click="snapshot()">Snapshot</button>
@@ -199,6 +220,8 @@ INDEX_HTML = r"""<!doctype html>
         <button :class="tool==='box'?'active':''"     @click="setTool('box')"     title="Box">[ ]</button>
         <button :class="tool==='polygon'?'active':''" @click="setTool('polygon')" title="Polygon (click to add, dblclick to close, Esc to cancel)">&#9699;</button>
         <div class="sep"></div>
+        <button class="add" :class="tool==='add_tank'?'active':''" @click="setTool('add_tank')" title="Draw a perimeter on the live feed to add a new tank (drag a rectangle)">+ Tank</button>
+        <div class="sep"></div>
         <button class="danger" @click="clearMeasurements()" title="Clear all measurements">X</button>
       </div>
 
@@ -251,7 +274,6 @@ INDEX_HTML = r"""<!doctype html>
         <div class="tank-head">
           <div class="tank-id"><b x-text="t.id.toUpperCase().replace('_','-')"></b></div>
           <div class="flex items-center gap-2">
-            <div class="tank-medium" :class="t.medium || 'unknown'" x-text="t.medium || 'unknown'"></div>
             <div class="tank-status" :class="tankStatus(t).klass" x-text="tankStatus(t).label"></div>
           </div>
         </div>
@@ -313,16 +335,51 @@ INDEX_HTML = r"""<!doctype html>
     </template>
     <template x-if="!state.results?.length">
       <div class="card p-4 text-center text-slate-400 text-sm">
-        No tanks configured yet. Press <span class="chip">Auto-detect</span> to find them.
+        No tanks configured yet. Use <span class="k text-emerald-400">+ Tank</span> to draw a perimeter, or <span class="k">Auto-detect</span>.
       </div>
     </template>
   </aside>
 </main>
 
+<!-- Alerts / Events floating panel (bottom-right) -->
+<div class="alerts-panel-fixed" :class="alerts.collapsed?'collapsed':''">
+  <div class="ap-head" @click="alerts.collapsed=!alerts.collapsed">
+    <div class="flex items-center gap-2">
+      <span class="dot" :class="unackCount()?'err':'idle'"></span>
+      <span class="title">Alerts &amp; Events</span>
+      <span class="badge" x-show="unackCount()" x-text="unackCount()"></span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="btn sm" @click.stop="clearAlerts()" x-show="alerts.items.length" title="Clear list">clear</button>
+      <span class="k text-slate-400 text-[.6rem]" x-text="alerts.collapsed?'show':'hide'"></span>
+    </div>
+  </div>
+  <div class="ap-body" x-show="!alerts.collapsed">
+    <template x-if="!alerts.items.length">
+      <div class="text-slate-500 text-[.72rem] text-center py-3">No recent alerts.</div>
+    </template>
+    <template x-for="a in alerts.items" :key="a.seq">
+      <div class="alert-item" :class="alertCls(a)">
+        <div class="meta">
+          <span class="kind" x-text="(a.kind||'').replace(/_/g,' ')"></span>
+          <span class="time" x-text="fmtAlertTime(a.ts)"></span>
+        </div>
+        <div class="msg" x-text="alertMessage(a)"></div>
+        <div class="acts">
+          <button class="btn" @click="pushAlertToNR(a)" x-show="!a._pushed" title="POST to Node-RED supervisor">Push NR</button>
+          <span class="pushed" x-show="a._pushed">pushed</span>
+          <button class="btn" @click="ackAlert(a.seq)" x-show="!a._ack">Ack</button>
+          <span class="pushed" x-show="a._ack" style="color:#94a3b8">ack</span>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.4</span>
+    <span>Operator Console v1.6</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -416,22 +473,51 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 
   <div class="p-4 space-y-5 text-xs">
-    <!-- Tanks summary -->
+    <!-- Tanks manager -->
     <section>
       <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Tanks</div>
-      <div class="flex items-center justify-between">
-        <div><b class="text-base" x-text="(state.results||[]).length"></b> configured</div>
-        <button class="btn sm primary" @click="panel=null; openDetectModal()">Auto-detect</button>
+      <div class="flex items-center justify-between mb-2">
+        <div><b class="text-base" x-text="(config?.tanks||[]).length"></b> configured</div>
+        <div class="flex gap-1">
+          <button class="btn sm" @click="panel=null; setTool('add_tank')" title="Draw a perimeter on the live feed">+ Draw</button>
+          <button class="btn sm" @click="addBlankTank()" title="Append a default-sized tank (edit to adjust)">+ Blank</button>
+          <button class="btn sm primary" @click="panel=null; openDetectModal()">Auto</button>
+        </div>
       </div>
+      <div class="flex gap-2 items-center text-[11px] mb-3">
+        <span class="text-slate-400">Number of tanks</span>
+        <select class="bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+                @change="setTankCount(Number($event.target.value))"
+                :value="(config?.tanks||[]).length">
+          <template x-for="n in [1,2,3,4,5,6]" :key="n">
+            <option :value="n" x-text="n + (n===1?' tank':' tanks')"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1" x-show="(config?.tanks||[]).length">
+        <template x-for="t in (config?.tanks || [])" :key="t.id">
+          <div class="flex items-center justify-between bg-black/30 border border-[#1f2630] rounded px-2 py-1 text-[11px]">
+            <div class="k truncate" style="max-width:220px"
+                 x-text="t.id + ' - ' + (t.geometry?.height_ft||'?') + 'ft'"></div>
+            <div class="flex gap-1">
+              <button class="btn sm" @click="panel=null; editTank(t)">Edit</button>
+              <button class="btn sm" @click="removeTank(t.id)">x</button>
+            </div>
+          </div>
+        </template>
+      </div>
+      <p class="text-[10px] text-slate-500 mt-2">Tip: pick <b>+ Draw</b> then drag a rectangle on the live feed.
+      Per-tank scale (0-100% = 0-X ft/in) is set in the Edit dialog.</p>
     </section>
 
-    <!-- Level unit -->
+    <!-- Level unit (moved here from top bar) -->
     <section>
       <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Level display unit</div>
       <div class="seg">
         <button :class="unit==='ft'?'active':''" @click="setUnit('ft')">feet</button>
         <button :class="unit==='in'?'active':''" @click="setUnit('in')">inches</button>
       </div>
+      <p class="text-[10px] text-slate-500 mt-1">Applies to tank cards and the Edit dialog scale input.</p>
     </section>
 
     <!-- Overlay toggles -->
@@ -485,7 +571,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.4 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.6 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -572,7 +658,8 @@ function app(){
     banner: null,
     calibrating: false,
     detect: { modal:false, show:false, running:false, framesUsed:0, candidates:[], unit:'ft' },
-    editor: { show:false, tank:null, heightValue:0, heightUnit:'ft' },
+    editor: { show:false, tank:null, heightValue:0, heightUnit:'ft', isNew:false },
+    alerts: { collapsed:false, items:[], since:0 },
 
     // Settings drawer: which overlay toggles to show
     overlayKeys: [
@@ -616,10 +703,13 @@ function app(){
       setInterval(()=>this.tick(), 1500);
       setInterval(()=>this.pollRecording(), 2000);
       setInterval(()=>this.refreshMeasurements(), 1500);
+      setInterval(()=>this.fetchAlerts(), 3000);
       window.addEventListener('resize', () => this.syncCanvas());
       window.addEventListener('keydown', (e) => this.onKey(e));
       // Canvas gets its size from the <img> once it loads.
       requestAnimationFrame(() => this.syncCanvas());
+      // First alerts fetch immediately
+      this.fetchAlerts();
     },
     async reloadConfig(){
       try {
@@ -771,12 +861,14 @@ function app(){
     onDown(ev){
       if (this.tool === 'select' || this.tool === 'polygon') return;
       const p = this.mousePos(ev);
-      this.draft = { kind: this.tool, coords: [p, p] };
+      // add_tank uses a box draft shape so existing renderer handles it
+      const kind = this.tool === 'add_tank' ? 'box' : this.tool;
+      this.draft = { kind, coords: [p, p], _source: this.tool };
       this.redrawCanvas();
     },
     onMove(ev){
       if (!this.draft) return;
-      if (this.tool === 'line' || this.tool === 'box') {
+      if (this.tool === 'line' || this.tool === 'box' || this.tool === 'add_tank') {
         const p = this.mousePos(ev);
         this.draft.coords[1] = p;
         this.redrawCanvas();
@@ -797,6 +889,38 @@ function app(){
         if (dx < 3 && dy < 3) { this.draft = null; this.redrawCanvas(); return; }
         await this.commitMeasurement(this.tool, [a, b]);
         this.draft = null;
+        return;
+      }
+      if (this.tool === 'add_tank') {
+        if (!this.draft) return;
+        const a = this.draft.coords[0], b = p;
+        const dx = Math.abs(a[0]-b[0]), dy = Math.abs(a[1]-b[1]);
+        if (dx < 8 || dy < 8) { this.draft = null; this.redrawCanvas(); return; }
+        // canvas -> rendered coords, then rendered / upscale -> sensor coords
+        const rA = this.toRendered(a);
+        const rB = this.toRendered(b);
+        const up = Math.max(1, this.state.upscale || 1);
+        const roi = {
+          x: Math.max(0, Math.round(Math.min(rA[0], rB[0]) / up)),
+          y: Math.max(0, Math.round(Math.min(rA[1], rB[1]) / up)),
+          w: Math.max(1, Math.round(Math.abs(rA[0]-rB[0]) / up)),
+          h: Math.max(1, Math.round(Math.abs(rA[1]-rB[1]) / up)),
+        };
+        const id = this.nextTankId();
+        const site = this.siteId.toLowerCase().replace(/[^a-z0-9]+/g,'-');
+        this.editTank({
+          id,
+          name: id.replace(/_/g,' '),
+          medium: 'unknown',
+          roi,
+          geometry: { height_ft: 20, diameter_ft: 10, shape: 'vertical_cylinder' },
+          min_temp_delta: 0.8,
+          topic: 'nucleus/' + site + '/' + id,
+        });
+        this.editor.isNew = true;
+        this.draft = null;
+        this.redrawCanvas();
+        this.setTool('select');
         return;
       }
       if (this.tool === 'polygon') {
@@ -1000,6 +1124,7 @@ function app(){
       staged.roi = Object.assign({x:0,y:0,w:40,h:170}, staged.roi || {});
       staged.geometry = Object.assign({height_ft:20,diameter_ft:10,shape:'vertical_cylinder'}, staged.geometry || {});
       this.editor.tank = staged;
+      this.editor.isNew = !((this.config?.tanks || []).some(x => x.id === staged.id));
       // Seed scale inputs from whatever unit the UI currently prefers.
       const ft = Number(staged.geometry.height_ft) || 0;
       this.editor.heightUnit = this.unit === 'in' ? 'in' : 'ft';
@@ -1013,6 +1138,7 @@ function app(){
       const heightFt = this.editor.heightUnit === 'in' ? +(val / 12).toFixed(3) : val;
       t.geometry = Object.assign({}, t.geometry, { height_ft: heightFt });
       const body = {
+        id: t.id,
         name: t.name,
         medium: t.medium,
         topic: (t.topic || '').trim() || null,
@@ -1025,19 +1151,167 @@ function app(){
         geometry: t.geometry,
         min_temp_delta: t.min_temp_delta,
       };
-      await fetch('/api/tanks/'+encodeURIComponent(t.id), {
-        method:'PATCH',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(body),
-      });
-      this.editor.show = false;
-      this.banner = 'Saved ' + t.id + ' (scale 0-100% = 0-' + val + ' ' + this.editor.heightUnit + ')';
-      await this.reloadConfig();
+      try {
+        if (this.editor.isNew) {
+          const r = await fetch('/api/tanks', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) {
+            const j = await r.json().catch(()=>({}));
+            this.banner = 'Save failed: ' + (j.error || r.status);
+            return;
+          }
+        } else {
+          await fetch('/api/tanks/'+encodeURIComponent(t.id), {
+            method:'PATCH',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body),
+          });
+        }
+        this.editor.show = false;
+        this.editor.isNew = false;
+        this.banner = 'Saved ' + t.id + ' (scale 0-100% = 0-' + val + ' ' + this.editor.heightUnit + ')';
+        await this.reloadConfig();
+      } catch(e){ this.banner = 'Save failed: ' + e; }
     },
     async removeTank(id){
       if (!confirm('Remove '+id+'?')) return;
       await fetch('/api/tanks/'+encodeURIComponent(id), {method:'DELETE'});
       await this.reloadConfig();
+    },
+    nextTankId(){
+      const taken = new Set((this.config?.tanks || []).map(t => t.id));
+      let i = (this.config?.tanks || []).length + 1;
+      while (taken.has('tank_' + i)) i++;
+      return 'tank_' + i;
+    },
+    async addBlankTank(){
+      const id = this.nextTankId();
+      const site = this.siteId.toLowerCase().replace(/[^a-z0-9]+/g,'-');
+      const body = {
+        id,
+        name: id.replace(/_/g,' '),
+        medium: 'unknown',
+        roi: { x: 40, y: 40, w: 60, h: 180 },
+        geometry: { height_ft: 20, diameter_ft: 10, shape: 'vertical_cylinder' },
+        min_temp_delta: 0.8,
+        topic: 'nucleus/' + site + '/' + id,
+      };
+      try {
+        const r = await fetch('/api/tanks', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(()=>({}));
+          this.banner = 'Add failed: ' + (j.error || r.status);
+          return;
+        }
+        await this.reloadConfig();
+        this.banner = 'Added ' + id + ' — use Edit to adjust perimeter & scale.';
+      } catch(e){ this.banner = 'Add failed: ' + e; }
+    },
+    async setTankCount(target){
+      target = Math.max(0, Math.min(12, Number(target) || 0));
+      const tanks = (this.config?.tanks || []).slice();
+      const cur = tanks.length;
+      if (target === cur) return;
+      if (target < cur) {
+        if (!confirm('Remove ' + (cur - target) + ' tank(s) from the end?')) {
+          await this.reloadConfig();
+          return;
+        }
+        for (let i = cur - 1; i >= target; i--) {
+          await fetch('/api/tanks/'+encodeURIComponent(tanks[i].id), {method:'DELETE'});
+        }
+        await this.reloadConfig();
+        this.banner = 'Trimmed to ' + target + ' tank(s).';
+        return;
+      }
+      // target > cur — append blanks with non-colliding ids
+      for (let i = 0; i < (target - cur); i++) {
+        await this.addBlankTank();
+      }
+    },
+
+    // -------------------- Alerts / Events --------------------
+    async fetchAlerts(){
+      try {
+        const r = await fetch('/api/alerts?since=' + (this.alerts.since || 0));
+        if (!r.ok) return;
+        const j = await r.json();
+        const items = Array.isArray(j.items) ? j.items : [];
+        if (!items.length) return;
+        // Server returns oldest→newest for "since"; merge newest-first into state.
+        const byId = new Map(this.alerts.items.map(a => [a.seq, a]));
+        for (const a of items) if (!byId.has(a.seq)) byId.set(a.seq, a);
+        const merged = Array.from(byId.values())
+          .sort((a,b) => (b.seq||0) - (a.seq||0))
+          .slice(0, 40);
+        this.alerts.items = merged;
+        this.alerts.since = Math.max(this.alerts.since || 0, ...items.map(a => a.seq || 0));
+      } catch(e){}
+    },
+    unackCount(){
+      return (this.alerts.items || []).filter(a => !a._ack).length;
+    },
+    ackAlert(seq){
+      const a = (this.alerts.items || []).find(x => x.seq === seq);
+      if (a) a._ack = true;
+    },
+    clearAlerts(){
+      this.alerts.items = [];
+    },
+    async pushAlertToNR(a){
+      try {
+        const r = await fetch('/api/alerts/push', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({seq: a.seq}),
+        });
+        if (r.ok) {
+          a._pushed = true;
+          this.banner = 'Alert pushed to Node-RED';
+        } else {
+          const j = await r.json().catch(()=>({}));
+          this.banner = 'Push failed: ' + (j.error || r.status);
+        }
+      } catch(e){ this.banner = 'Push failed: ' + e; }
+    },
+    alertCls(a){
+      if (!a) return '';
+      if (a.kind === 'low_confidence') return 'warn';
+      if (a.kind === 'level_change') {
+        const delta = Math.abs((a.level_pct||0) - (a.prev==null?a.level_pct||0:a.prev));
+        if (delta > 20) return 'al';
+        return 'warn';
+      }
+      if (a.kind === 'tank_removed') return 'warn';
+      return '';
+    },
+    fmtAlertTime(ts){
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      const p = (n) => String(n).padStart(2,'0');
+      return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+    },
+    alertMessage(a){
+      if (!a) return '';
+      const id = a.id || '-';
+      if (a.kind === 'level_change') {
+        const prev = (a.prev==null) ? '?' : Number(a.prev).toFixed(1)+'%';
+        const cur  = (a.level_pct==null) ? '?' : Number(a.level_pct).toFixed(1)+'%';
+        return id + ': level ' + prev + ' -> ' + cur;
+      }
+      if (a.kind === 'low_confidence') return id + ': low confidence (grad ' + Number(a.gradient_peak||0).toFixed(2) + ')';
+      if (a.kind === 'tank_added')     return 'tank ' + id + ' added';
+      if (a.kind === 'tank_removed')   return 'tank ' + id + ' removed';
+      if (a.kind === 'calibrated')     return 'calibrated (medium=' + (a.medium||'?') + ', locked=' + (a.locked?'yes':'no') + ')';
+      if (a.kind === 'auto_detect')    return 'auto-detect: ' + (a.count||0) + ' candidates';
+      return a.kind || 'event';
     },
   };
 }

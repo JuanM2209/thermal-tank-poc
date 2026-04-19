@@ -156,6 +156,7 @@ def main():
         on_config_change=_on_cfg_change,
         persist_path=RUNTIME_OVERRIDE if os.path.isdir(os.path.dirname(RUNTIME_OVERRIDE)) else None,
         recorder=recorder,
+        publisher=publisher,
     )
     if cfg.get("stream", {}).get("enabled", True):
         server.run_threaded(port=cfg["stream"].get("port", 8080))

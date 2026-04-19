@@ -81,12 +81,14 @@ class WebServer:
         on_config_change: Callable[[], None] | None = None,
         persist_path: str | None = None,
         recorder=None,
+        publisher=None,
     ):
         self._cfg = config
         self._cfg_lock = threading.Lock()
         self._on_change = on_config_change or (lambda: None)
         self._persist_path = persist_path
         self._recorder = recorder
+        self._publisher = publisher
         # Short-TTL caches for hot polling endpoints. Multiple browser tabs +
         # Node-RED dashboards otherwise flood Flask and starve the main loop.
         self._state_cache = _ShortCache(ttl=0.3)
@@ -96,6 +98,11 @@ class WebServer:
         self.app.config["JSON_SORT_KEYS"] = False
         self._install_headers()
         self._setup_routes()
+
+    def set_publisher(self, publisher) -> None:
+        """Late-bind the Node-RED publisher. main.py creates the server
+        before the publisher (to share config), so this wires them up."""
+        self._publisher = publisher
 
     # ---------- Config helpers ----------
     def cfg(self) -> dict:
@@ -268,6 +275,63 @@ class WebServer:
             except ValueError:
                 since = 0
             return jsonify(SHARED.events_since(since))
+
+        # ---- alerts (operator-console flavored events) ----
+        # Alerts are a filtered view of the event ring-buffer: we only surface
+        # the kinds the operator should actually see (level changes, low
+        # confidence, tank add/remove, calibration, auto-detect), and we
+        # return them in {items:[...], since:N} so the UI can incrementally
+        # poll with ?since=.
+        _ALERT_KINDS = {
+            "level_change", "low_confidence",
+            "tank_added", "tank_removed",
+            "calibrated", "auto_detect",
+        }
+
+        @app.route("/api/alerts")
+        def api_alerts():
+            try:
+                since = int(request.args.get("since", "0"))
+            except ValueError:
+                since = 0
+            try:
+                limit = max(1, min(200, int(request.args.get("limit", "50"))))
+            except ValueError:
+                limit = 50
+            events = SHARED.events_since(since, limit=limit)
+            items = [e for e in events if e.get("kind") in _ALERT_KINDS]
+            return jsonify({"items": items, "since": since})
+
+        @app.route("/api/alerts/push", methods=["POST"])
+        def api_alerts_push():
+            """Manually push a specific alert (by seq) to the Node-RED
+            supervisor dashboard. Useful when the operator confirms a
+            suggestion or wants to force an alarm notification."""
+            body = request.get_json(silent=True) or {}
+            seq = body.get("seq")
+            if seq is None:
+                return jsonify({"error": "missing seq"}), 400
+            try:
+                seq = int(seq)
+            except (TypeError, ValueError):
+                return jsonify({"error": "bad seq"}), 400
+            # find the event
+            match = None
+            for e in SHARED.events_since(0, limit=200):
+                if e.get("seq") == seq:
+                    match = e
+                    break
+            if not match:
+                return jsonify({"error": "alert not found"}), 404
+            if not self._publisher:
+                return jsonify({"error": "publisher not configured"}), 503
+            try:
+                self._publisher.push_alert(match)
+            except Exception as e:
+                log.warning(f"push_alert failed: {e}")
+                return jsonify({"error": str(e)}), 500
+            SHARED.append_event("alert_pushed", seq=seq, kind=match.get("kind"))
+            return jsonify({"ok": True, "pushed": match})
 
         # ---- auto-detect ----
         @app.route("/api/detect", methods=["POST"])
