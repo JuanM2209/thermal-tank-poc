@@ -19,6 +19,25 @@ v1.7 additions:
     interface_row_sensor (absolute Y px in sensor coords, for drawing the
     level line on the UI canvas), alarms_state (hi/lo crossings), layers
     (secondary gradient peaks when multi_layer is enabled per tank).
+
+v1.8 reliability layer:
+    A naive argmax on |dT/dy| is too trusting — a warm hand or edge artifact
+    creates a sharp gradient the algorithm mis-reads as a liquid/air interface.
+    Before publishing a level we now run four checks:
+      1. Emptiness      — if the strip's temperature span is below 2x the
+                          confidence gate, there is no interface → level=0,
+                          reliability="empty".
+      2. Edge-clip      — a peak in the top/bottom 5% of the ROI is almost
+                          always an edge artifact (something outside the
+                          tank bleeding in) → reliability="uncertain".
+      3. Step quality   — require the "above" and "below" halves of the
+                          interface to be internally uniform (low std) AND
+                          differ in mean by at least the gate. Hand blobs
+                          fail this because the "above" region is noisy.
+      4. Temporal MAD   — reject peaks that deviate > 3*MAD from the median
+                          of the last N frames, snap to the stable level.
+    When any check fails we still return a result (so the UI has something
+    to render) but with reliability != "ok" and level_pct = last_stable.
 """
 
 from __future__ import annotations
@@ -49,6 +68,26 @@ MULTI_LAYER_MIN_SEP_FRAC = 0.08
 # dishwater secondary peaks from imaging noise.
 MULTI_LAYER_REL_FLOOR = 0.45
 
+# --- v1.8 reliability tuning --------------------------------------------
+# A peak landing in the top or bottom EDGE_MARGIN_FRAC of the ROI is almost
+# always an edge artifact (something outside the tank leaking into the
+# first/last rows). 5% → for a 60-row ROI, rows <3 and >56 are rejected.
+EDGE_MARGIN_FRAC = 0.05
+# A strip whose temperature span is below this many x the per-tank min
+# temp delta is considered "empty" (no interface present). Report level=0
+# rather than finding a noise-level max gradient.
+EMPTY_SPAN_MULTIPLIER = 2.0
+# For the step-quality test: require the "above" and "below" region means
+# to differ by at least this many times the per-tank gate.
+STEP_DELTA_MIN_MULTIPLIER = 0.6
+# For the step-quality test: each half's std dev must be below this
+# fraction of the full strip span (kind of a Otsu-lite coherence score).
+STEP_STDEV_FRAC_MAX = 0.35
+# Temporal MAD: reject a peak row that moves by more than this many MADs
+# from the rolling median over the last N frames.
+TEMPORAL_MAD_K = 3.0
+TEMPORAL_WINDOW = 7
+
 
 class TankAnalyzer:
     def __init__(
@@ -66,6 +105,17 @@ class TankAnalyzer:
         self._level_hist: dict[str, deque[float]] = {
             t["id"]: deque(maxlen=history) for t in tanks_config
         }
+        # v1.8: per-tank history of the raw peak row (0..roi_h-1) so we can
+        # compute a temporal MAD and reject single-frame outliers. Uses a
+        # larger window than level_hist because peaks are noisier than the
+        # already-smoothed level_pct.
+        self._peak_hist: dict[str, deque[int]] = {
+            t["id"]: deque(maxlen=TEMPORAL_WINDOW) for t in tanks_config
+        }
+        # v1.8: last "good" (reliability=="ok") reading per tank, used as
+        # the fallback when the current frame is flagged uncertain so the
+        # UI still shows a stable number instead of NaN.
+        self._last_good: dict[str, dict[str, Any]] = {}
         self._classifier = MediumClassifier()
         self._classify_cache: dict[str, Classification] = {}
         self._classify_next_at: dict[str, float] = {}
@@ -112,6 +162,80 @@ class TankAnalyzer:
             return None
         return idx
 
+    def _reliability_check(
+        self,
+        tank_id: str,
+        profile: np.ndarray,
+        grad: np.ndarray,
+        peak_idx: int,
+        peak_val: float,
+        min_delta: float,
+    ) -> dict[str, Any]:
+        """Run the four v1.8 sanity checks on a candidate interface.
+
+        Returns a dict with:
+            reliability : "ok" | "empty" | "uncertain"
+            reasons     : list of failed-check names (empty when ok)
+            effective_peak_idx : peak row to use downstream (may be the
+                                 rolling median when temporal MAD fires).
+        """
+        reasons: list[str] = []
+        n = int(profile.size)
+        strip_span = float(profile.max() - profile.min())
+
+        # 1. Emptiness — if the whole ROI is uniform in temperature there is
+        #    no interface to find. Report 0% rather than a noise-level max.
+        if strip_span < EMPTY_SPAN_MULTIPLIER * min_delta:
+            return {
+                "reliability": "empty",
+                "reasons": ["flat_profile"],
+                "effective_peak_idx": peak_idx,
+                "strip_span": strip_span,
+            }
+
+        # 2. Edge-clip — peaks in the outermost band are almost always
+        #    artifacts of something outside the tank leaking into the ROI
+        #    (sunlit wall, a person walking by, frame border).
+        edge_margin = max(1, int(EDGE_MARGIN_FRAC * n))
+        if peak_idx < edge_margin or peak_idx > (n - 1 - edge_margin):
+            reasons.append("edge_clip")
+
+        # 3. Step quality — a real liquid interface separates the profile
+        #    into two internally-uniform halves with a meaningful mean
+        #    delta. Hand blobs and localized hot spots fail this because
+        #    the "above" half is noisy.
+        if edge_margin <= peak_idx <= (n - 1 - edge_margin):
+            above = profile[:peak_idx]
+            below = profile[peak_idx:]
+            if above.size >= 2 and below.size >= 2:
+                step_delta = abs(float(below.mean() - above.mean()))
+                max_std = max(float(above.std()), float(below.std()))
+                if step_delta < STEP_DELTA_MIN_MULTIPLIER * min_delta:
+                    reasons.append("weak_step")
+                if strip_span > 0 and (max_std / strip_span) > STEP_STDEV_FRAC_MAX:
+                    reasons.append("noisy_halves")
+
+        # 4. Temporal MAD — a real liquid level moves over seconds; single-
+        #    frame spikes (somebody waved a hand past) get clamped to the
+        #    rolling median of the last N peaks.
+        hist = self._peak_hist.setdefault(tank_id, deque(maxlen=TEMPORAL_WINDOW))
+        effective = peak_idx
+        if len(hist) >= 3:
+            med = float(np.median(hist))
+            mad = float(np.median(np.abs(np.array(hist, dtype=np.float32) - med))) or 1.0
+            if abs(peak_idx - med) > TEMPORAL_MAD_K * mad:
+                reasons.append("temporal_spike")
+                effective = int(round(med))
+        hist.append(int(peak_idx))
+
+        reliability = "uncertain" if reasons else "ok"
+        return {
+            "reliability": reliability,
+            "reasons": reasons,
+            "effective_peak_idx": effective,
+            "strip_span": strip_span,
+        }
+
     def _alarms_state(self, t: dict, level_pct: float) -> dict[str, Any]:
         """Derive per-tank HI/LO alarm booleans from the tank config.
 
@@ -153,19 +277,64 @@ class TankAnalyzer:
 
             profile = self._profile(strip)
             grad = self._gradient(profile)
-            peak_idx = int(np.argmax(grad))
-            peak_val = float(grad[peak_idx])
+            peak_idx_raw = int(np.argmax(grad))
+            peak_val = float(grad[peak_idx_raw])
 
             n = len(profile)
-            level_pct = (n - peak_idx) / n * 100.0
-            if self.invert:
-                level_pct = 100.0 - level_pct
+            min_delta = float(t.get("min_temp_delta", 1.0))
+
+            # --- v1.8 reliability layer --------------------------------
+            # Before trusting peak_idx, check for empty-tank, edge-clip,
+            # bad step shape, and temporal spikes.
+            rel = self._reliability_check(
+                tank_id=t["id"],
+                profile=profile,
+                grad=grad,
+                peak_idx=peak_idx_raw,
+                peak_val=peak_val,
+                min_delta=min_delta,
+            )
+            reliability = rel["reliability"]
+            reliability_reasons = rel["reasons"]
+            peak_idx = int(rel["effective_peak_idx"])
+
+            # Resolve level according to reliability class.
+            if reliability == "empty":
+                # Flat scene — no interface at all. Report 0% so the UI
+                # renders an empty tank instead of pinning to 100%.
+                level_pct = 0.0
+            else:
+                level_pct = (n - peak_idx) / n * 100.0
+                if self.invert:
+                    level_pct = 100.0 - level_pct
 
             hist = self._level_hist.setdefault(t["id"], deque(maxlen=5))
-            hist.append(level_pct)
-            level_stable = float(np.median(hist))
 
-            min_delta = float(t.get("min_temp_delta", 1.0))
+            if reliability == "uncertain":
+                # Don't pollute the median with garbage frames — fall back
+                # to the last known-good reading if we have one.
+                last_good = self._last_good.get(t["id"])
+                if last_good is not None:
+                    level_stable = float(last_good["level_pct"])
+                    peak_idx = int(last_good["peak_idx"])
+                    level_pct = level_stable
+                else:
+                    # No history yet: keep the raw value so the UI can
+                    # still render, but flagged uncertain.
+                    hist.append(level_pct)
+                    level_stable = float(np.median(hist))
+            else:
+                hist.append(level_pct)
+                level_stable = float(np.median(hist))
+                self._last_good[t["id"]] = {
+                    "level_pct": level_stable,
+                    "peak_idx": peak_idx,
+                }
+
+            # Confidence still tracks the gradient gate — it's a strictly
+            # narrower signal than reliability. A frame can have high
+            # confidence (strong gradient) but still be uncertain (edge
+            # artifact in the top row).
             confidence = "high" if peak_val >= min_delta else "low"
 
             # Absolute row inside the sensor frame — the UI needs this to
@@ -268,6 +437,8 @@ class TankAnalyzer:
                     "interface_row": peak_idx,
                     "interface_row_sensor": interface_row_sensor,
                     "confidence": confidence,
+                    "reliability": reliability,
+                    "reliability_reasons": reliability_reasons,
                     "roi": r,
                     "geometry": _geometry_dict(geometry) if geometry else None,
                     "reading": reading_dict,
@@ -299,16 +470,36 @@ class TankAnalyzer:
         profile = self._profile(strip)
         grad = self._gradient(profile)
         peak_idx = int(np.argmax(grad))
+        peak_val = float(grad[peak_idx])
+        min_delta = float(t.get("min_temp_delta", 1.0))
+        # Re-run the reliability check so the Why modal can surface the same
+        # reasons the analyzer used. Does not mutate history (that's the
+        # analyze() call's job).
+        saved_hist = list(self._peak_hist.get(t["id"], ()))
+        rel = self._reliability_check(
+            tank_id=t["id"],
+            profile=profile,
+            grad=grad,
+            peak_idx=peak_idx,
+            peak_val=peak_val,
+            min_delta=min_delta,
+        )
+        # Restore history — analyze_detailed is a read-only diagnostic path
+        # and should not influence the temporal MAD.
+        self._peak_hist[t["id"]] = deque(saved_hist, maxlen=TEMPORAL_WINDOW)
         return {
             "id": t["id"],
             "roi": r,
             "profile": [round(float(v), 3) for v in profile],
             "gradient": [round(float(v), 4) for v in grad],
             "peak_idx": peak_idx,
-            "peak_val": round(float(grad[peak_idx]), 4),
-            "min_temp_delta": float(t.get("min_temp_delta", 1.0)),
+            "peak_val": round(peak_val, 4),
+            "min_temp_delta": min_delta,
             "roi_height": int(strip.shape[0]),
             "y0": y0,
+            "reliability": rel["reliability"],
+            "reliability_reasons": rel["reasons"],
+            "strip_span": round(float(rel["strip_span"]), 3),
         }
 
 

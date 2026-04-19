@@ -58,6 +58,18 @@ INDEX_HTML = r"""<!doctype html>
     .tank-status.warning{background:rgba(245,158,11,.14);color:#fbbf24;border:1px solid #92400e}
     .tank-status.alert{background:rgba(239,68,68,.16);color:#f87171;border:1px solid #991b1b}
     .tank-status.lo{background:#1e293b;color:#94a3b8;border:1px solid #334155}
+    /* v1.8 reliability chips */
+    .tank-status.uncertain{background:rgba(234,179,8,.12);color:#facc15;border:1px solid #854d0e;animation:uncertainPulse 2s ease-in-out infinite}
+    .tank-status.empty{background:rgba(100,116,139,.15);color:#cbd5e1;border:1px solid #475569}
+    @keyframes uncertainPulse{0%,100%{opacity:1}50%{opacity:.55}}
+    .tank-card.uncertain{border-color:#854d0e;box-shadow:0 0 0 1px #ca8a04 inset}
+    /* Diagonal-hatch fill when reliability is uncertain — signals "do not
+       trust this number" without blanking the card entirely. */
+    .fill-col .fill.uncertain{background:repeating-linear-gradient(135deg,#facc15 0 6px,#713f12 6px 12px);opacity:.65}
+    .tank-pct.uncertain{color:#facc15}
+    .tank-pct.empty{color:#94a3b8}
+    .reliability-note{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#facc15;margin-top:4px}
+    .reliability-note.empty{color:#94a3b8}
 
     .tank-body{display:grid;grid-template-columns:40px 1fr;gap:14px;align-items:stretch;margin-bottom:12px}
     .fill-col{position:relative;border-radius:6px;overflow:hidden;background:#050a0f;border:1px solid #1f2937;min-height:96px}
@@ -153,6 +165,10 @@ INDEX_HTML = r"""<!doctype html>
     .inspector-line .tag{background:#fbbf24;color:#000;font-size:.62rem;font-weight:800;padding:3px 8px;border-radius:3px;letter-spacing:.08em;transform:translateY(-50%);font-family:ui-monospace,SFMono-Regular,monospace}
     .inspector-line.secondary{border-top-color:#a855f7}
     .inspector-line.secondary .tag{background:#a855f7;color:#fff}
+    /* v1.8: uncertain reading visualised on the live feed */
+    .inspector-line.uncertain{border-top-color:#facc15;border-top-style:dotted}
+    .inspector-line.uncertain .tag{background:#facc15;color:#111}
+    .inspector-box.uncertain{border-color:#facc15;box-shadow:0 0 0 9999px rgba(40,30,5,.5),0 0 14px rgba(250,204,21,.45)}
     .inspector-alarm-line{position:absolute;height:0;border-top:1px dashed #ef4444;left:0;right:0;opacity:.75}
     .inspector-alarm-line.lo{border-top-color:#f59e0b}
     .inspector-alarm-line .tag{position:absolute;right:2px;top:-8px;background:rgba(15,23,42,.85);color:#ef4444;font-size:.55rem;padding:1px 4px;border-radius:2px;letter-spacing:.1em;font-family:ui-monospace,SFMono-Regular,monospace}
@@ -340,7 +356,7 @@ INDEX_HTML = r"""<!doctype html>
           <div>
             <div class="inspector-box" :class="inspectorBoxCls()" :style="inspectorBoxStyle()"></div>
             <!-- primary level line -->
-            <div class="inspector-line" :style="inspectorLineStyle('primary')">
+            <div class="inspector-line" :class="inspectorLineCls()" :style="inspectorLineStyle('primary')">
               <span class="tag" x-text="inspectorPrimaryLabel()"></span>
             </div>
             <!-- secondary layer (sludge) when multi_layer on -->
@@ -391,18 +407,15 @@ INDEX_HTML = r"""<!doctype html>
           </div>
           <div class="tank-hero">
             <div class="tank-pct" :class="pctColorClass(t)"
-                 x-text="(t.level_pct!=null ? t.level_pct.toFixed(1) : '--') + '%'"></div>
-            <div class="tank-sub">
-              <span>OF </span><b x-text="(t.geometry?.height_ft||'--') + ' FT'"></b>
-              <span x-show="t.reading?.volume_bbl != null"> &middot; </span>
-              <b x-show="t.reading?.volume_bbl != null"
-                 x-text="Math.round(t.reading?.volume_bbl||0).toLocaleString() + ' BBL'"></b>
-            </div>
-            <div class="tank-sub" style="margin-top:2px">
-              <span>TOTAL VOLUME CAPACITY</span>
-              <b x-show="t.reading?.volume_full_bbl != null" style="margin-left:6px"
-                 x-text="Math.round(t.reading?.volume_full_bbl||0).toLocaleString() + ' BBL'"></b>
-            </div>
+                 x-text="tankHero(t)"></div>
+            <div class="tank-sub" x-text="tankSubLine1(t)"></div>
+            <div class="tank-sub" style="margin-top:2px" x-text="tankSubLine2(t)"></div>
+            <!-- v1.8: reliability note appears only when detector is
+                 unsure (edge artifact, noisy, temporal spike). Operator
+                 sees at a glance that the number should not be trusted. -->
+            <div class="reliability-note" :class="t.reliability"
+                 x-show="t.reliability==='uncertain' || t.reliability==='empty'"
+                 x-text="reliabilityNote(t)"></div>
           </div>
         </div>
 
@@ -505,7 +518,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.7</span>
+    <span>Operator Console v1.8</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -535,10 +548,14 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <span class="text-[11px] text-slate-500 self-center">Height unit for full-scale</span>
     </div>
+    <p class="text-[11px] text-amber-300 mb-2">
+      Uncheck <b>Keep</b> for any box that is NOT a tank. Only checked candidates become measurement targets.
+    </p>
     <table class="w-full text-xs">
       <thead class="text-left text-slate-400">
         <tr>
-          <th class="p-1">#</th><th>Name</th><th>Medium</th>
+          <th class="p-1">Keep</th>
+          <th>#</th><th>Name</th><th>Medium</th>
           <th>Topic</th>
           <th>Full-scale (<span x-text="detect.unit"></span>)</th>
           <th>Dia. ft</th>
@@ -548,7 +565,13 @@ INDEX_HTML = r"""<!doctype html>
       </thead>
       <tbody>
         <template x-for="(c,i) in detect.candidates" :key="c.id">
-          <tr class="border-t border-[#1f2630] align-top">
+          <tr class="border-t border-[#1f2630] align-top" :class="c.keep===false?'opacity-50':''">
+            <td class="p-1 text-center">
+              <input type="checkbox" :checked="c.keep !== false"
+                     @change="c.keep = $event.target.checked"
+                     class="w-4 h-4 accent-emerald-500 cursor-pointer"
+                     title="Confirm this is a tank">
+            </td>
             <td class="p-1 k" x-text="i+1"></td>
             <td><input class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-24" x-model="c.name"></td>
             <td>
@@ -687,6 +710,26 @@ INDEX_HTML = r"""<!doctype html>
       </template>
     </section>
 
+    <!-- v1.8: Display primary unit -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Tank card &mdash; primary readout</div>
+      <div class="seg w-full" style="display:grid;grid-template-columns:repeat(4,1fr)">
+        <template x-for="u in [
+          {v:'percent',  l:'%'},
+          {v:'barrels',  l:'BBL'},
+          {v:'feet',     l:'FT'},
+          {v:'inches',   l:'IN'}
+        ]" :key="u.v">
+          <button :class="(config?.ui?.display_primary||'percent')===u.v?'active':''"
+                  @click="patch({ui:{display_primary:u.v}})"
+                  x-text="u.l"></button>
+        </template>
+      </div>
+      <p class="text-[10px] text-slate-500 mt-1">
+        The big number on every tank card. The other two units stay visible below it.
+      </p>
+    </section>
+
     <!-- Display timezone -->
     <section>
       <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Overlay timezone</div>
@@ -726,7 +769,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.7 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.8 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -913,6 +956,17 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
 
+        <!-- v1.8: reliability verdict -->
+        <div class="why-panel" x-show="why.live">
+          <div class="hd">Reliability</div>
+          <div class="val" x-text="(why.live?.reliability||'ok').toUpperCase()"
+               :class="why.live?.reliability==='ok'?'text-emerald-400'
+                      : why.live?.reliability==='empty'?'text-slate-300'
+                      : 'text-amber-400'"></div>
+          <div class="text-[10px] mt-1 text-slate-400"
+               x-text="(why.live?.reliability_reasons||[]).join(', ') || (why.live?.reliability==='ok'?'all checks passed':'')"></div>
+        </div>
+
         <!-- Plain-language explainer -->
         <div class="why-panel text-[12px] leading-relaxed" x-show="why.live">
           <div class="hd mb-2">Interpretation</div>
@@ -1055,6 +1109,11 @@ function app(){
 
     // -------------------- SCADA tank card helpers --------------------
     tankStatus(t){
+      // v1.8: reliability trumps the level-based status classifier.
+      // An uncertain reading should not also claim "Warning" or "Alert"
+      // from a bogus level_pct.
+      if (t.reliability === 'uncertain') return { klass:'uncertain', label:'Uncertain' };
+      if (t.reliability === 'empty')     return { klass:'empty',     label:'Empty'     };
       const p = t.level_pct || 0;
       if (t.confidence !== 'high') return { klass:'lo', label:'Low Conf' };
       if (p < 10 || p > 95) return { klass:'alert', label:'Alert' };
@@ -1067,17 +1126,65 @@ function app(){
       const cls = [medium];
       if (s.klass === 'alert') cls.push('alert');
       else if (s.klass === 'warning') cls.push('warning');
+      else if (s.klass === 'uncertain') cls.push('uncertain');
       return cls.join(' ');
     },
     fillColorClass(t){
       const s = this.tankStatus(t);
+      if (s.klass === 'uncertain') return 'uncertain';
       if (s.klass === 'alert') return 'alert';
       return t.medium || 'unknown';
     },
     pctColorClass(t){
       const s = this.tankStatus(t);
+      if (s.klass === 'uncertain') return 'uncertain';
+      if (s.klass === 'empty')     return 'empty';
       if (s.klass === 'alert') return 'alert';
       return t.medium || 'unknown';
+    },
+
+    // v1.8: hero readout respects the user-chosen primary unit.
+    // config.ui.display_primary: percent | barrels | feet | inches
+    tankHero(t){
+      if (t.level_pct == null) return '--';
+      const unit = (this.config?.ui?.display_primary) || 'percent';
+      const r = t.reading;
+      if (unit === 'barrels' && r?.volume_bbl != null)
+        return Math.round(r.volume_bbl).toLocaleString() + ' BBL';
+      if (unit === 'feet'    && r?.level_ft  != null) return r.level_ft.toFixed(2) + ' FT';
+      if (unit === 'inches'  && r?.level_in  != null) return r.level_in.toFixed(1) + ' in';
+      return t.level_pct.toFixed(1) + '%';
+    },
+    tankSubLine1(t){
+      // Shows the two units that are NOT the primary. Order: FT · BBL ·%
+      const unit = (this.config?.ui?.display_primary) || 'percent';
+      const parts = [];
+      if (unit !== 'percent') parts.push(((t.level_pct || 0).toFixed(1)) + '%');
+      if (unit !== 'feet' && t.reading?.level_ft != null)
+        parts.push(t.reading.level_ft.toFixed(2) + ' FT');
+      if (unit !== 'barrels' && t.reading?.volume_bbl != null)
+        parts.push(Math.round(t.reading.volume_bbl).toLocaleString() + ' BBL');
+      if (!parts.length) parts.push('OF ' + ((t.geometry?.height_ft)||'--') + ' FT');
+      return parts.join(' \u00b7 ');
+    },
+    tankSubLine2(t){
+      const full = t.reading?.volume_full_bbl;
+      if (full == null) return 'TOTAL VOLUME ' + ((t.geometry?.height_ft)||'--') + ' FT tall';
+      return 'TOTAL VOLUME CAPACITY  ' + Math.round(full).toLocaleString() + ' BBL';
+    },
+    reliabilityNote(t){
+      if (t.reliability === 'empty') return 'Tank appears empty (no thermal contrast)';
+      if (t.reliability !== 'uncertain') return '';
+      const reasons = t.reliability_reasons || [];
+      const friendly = {
+        edge_clip:     'hot/cold object at edge of ROI',
+        weak_step:     'temperature gradient too shallow',
+        noisy_halves:  'inside ROI is not uniform',
+        temporal_spike:'reading spiked this frame',
+        flat_profile:  'no thermal contrast',
+      };
+      const msg = reasons.map(r => friendly[r] || r).join(', ') || 'unreliable reading';
+      return 'Uncertain: ' + msg;
     },
     rateClass(t){
       const r = t.reading?.fill_rate_bbl_h;
@@ -1376,6 +1483,10 @@ function app(){
           const prior = existing.get(c.id) || {};
           return {
             ...c,
+            // v1.8: user MUST confirm each candidate is actually a tank.
+            // Default to true so the modal is not empty, but the user can
+            // untick any false positive before Accept & save.
+            keep: prior.keep !== false,
             topic: prior.topic || ('nucleus/' + site + '/' + c.id),
             geometry: prior.geometry || { height_ft: 20, diameter_ft: 10, shape: 'vertical_cylinder' },
           };
@@ -1385,7 +1496,13 @@ function app(){
       this.detect.running = false;
     },
     async acceptDetect(){
-      const body = { tanks: this.detect.candidates.map(c => ({
+      // v1.8: only candidates the operator confirmed (keep !== false) become live tanks.
+      const kept = this.detect.candidates.filter(c => c.keep !== false);
+      if (!kept.length){
+        this.banner = 'No candidates confirmed. Tick the Keep column for every real tank, then Accept.';
+        return;
+      }
+      const body = { tanks: kept.map(c => ({
         id: c.id,
         name: c.name,
         medium: c.medium,
@@ -1401,7 +1518,10 @@ function app(){
       }))};
       await fetch('/api/detect/accept', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
       this.detect.modal = false; this.detect.show = false;
-      this.banner = 'Saved ' + body.tanks.length + ' tank(s). Perimeters and topics applied.';
+      const dropped = this.detect.candidates.length - kept.length;
+      this.banner = 'Saved ' + kept.length + ' tank(s)'
+        + (dropped ? ' (' + dropped + ' rejected)' : '')
+        + '. Perimeters and topics applied.';
       await this.reloadConfig();
     },
     async runCalibrate(){
@@ -1604,7 +1724,12 @@ function app(){
     inspectorBoxCls(){
       const t = this.inspectedTank();
       if (!t) return '';
+      if (t.reliability === 'uncertain') return 'uncertain';
       return (t.alarms?.hi || t.alarms?.lo) ? 'alert' : '';
+    },
+    inspectorLineCls(){
+      const t = this.inspectedTank();
+      return t?.reliability === 'uncertain' ? 'uncertain' : '';
     },
     inspectorLineStyle(layer){
       const t = this.inspectedTank();
@@ -1625,6 +1750,8 @@ function app(){
     inspectorPrimaryLabel(){
       const t = this.inspectedTank();
       if (!t) return '';
+      if (t.reliability === 'empty')     return 'EMPTY (no thermal contrast)';
+      if (t.reliability === 'uncertain') return 'LEVEL UNCERTAIN \u2014 showing last stable reading';
       const pct = (t.level_pct != null ? t.level_pct.toFixed(1) : '--') + '%';
       const ft = t.reading?.level_ft != null ? (' \u00b7 ' + t.reading.level_ft.toFixed(2) + ' ft') : '';
       const bbl = t.reading?.volume_bbl != null ? (' \u00b7 ' + Math.round(t.reading.volume_bbl) + ' BBL') : '';
@@ -1686,6 +1813,9 @@ function app(){
       }).join(' ');
     },
     sparkStroke(t){
+      // v1.8: amber stroke when reliability is uncertain, gray when empty.
+      if (t.reliability === 'uncertain') return '#facc15';
+      if (t.reliability === 'empty')     return '#94a3b8';
       const m = t.medium || 'unknown';
       if (t.alarms?.hi || t.alarms?.lo) return '#f87171';
       if (m === 'water') return '#22d3ee';

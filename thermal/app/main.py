@@ -139,11 +139,18 @@ class EventDetector:
 
     def scan(self, results):
         for r in results:
+            # v1.8: suppress level_change spam while the reading is flagged
+            # "uncertain" (edge artifact, noisy halves, temporal spike).
+            # Empty-tank readings still emit because 0% is an actionable,
+            # known-good state the operator wants to see settle.
+            reliability = r.get("reliability", "ok")
             prev = self._last_level.get(r["id"])
-            if prev is None or abs(prev - r["level_pct"]) >= self.min_level_delta:
-                SHARED.append_event("level_change", id=r["id"],
-                                    level_pct=r["level_pct"], prev=prev)
-                self._last_level[r["id"]] = r["level_pct"]
+            if reliability != "uncertain":
+                if prev is None or abs(prev - r["level_pct"]) >= self.min_level_delta:
+                    SHARED.append_event("level_change", id=r["id"],
+                                        level_pct=r["level_pct"], prev=prev,
+                                        reliability=reliability)
+                    self._last_level[r["id"]] = r["level_pct"]
             prev_c = self._last_conf.get(r["id"])
             if prev_c != r["confidence"]:
                 if r["confidence"] == "low":
