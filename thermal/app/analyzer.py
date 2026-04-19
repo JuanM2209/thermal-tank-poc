@@ -310,6 +310,7 @@ class TankAnalyzer:
 
             hist = self._level_hist.setdefault(t["id"], deque(maxlen=5))
 
+            level_stable: float | None
             if reliability == "uncertain":
                 # Don't pollute the median with garbage frames — fall back
                 # to the last known-good reading if we have one.
@@ -319,10 +320,13 @@ class TankAnalyzer:
                     peak_idx = int(last_good["peak_idx"])
                     level_pct = level_stable
                 else:
-                    # No history yet: keep the raw value so the UI can
-                    # still render, but flagged uncertain.
-                    hist.append(level_pct)
-                    level_stable = float(np.median(hist))
+                    # No history yet (cold start, or never had an OK
+                    # frame): we refuse to make up a number. The UI
+                    # renders "--" for null level_pct and shows the
+                    # UNCERTAIN chip + reason. Previously we returned
+                    # the raw peak which pinned 100% at the top of the
+                    # ROI whenever a warm body clipped the edge.
+                    level_stable = None
             else:
                 hist.append(level_pct)
                 level_stable = float(np.median(hist))
@@ -394,7 +398,7 @@ class TankAnalyzer:
             geometry = parse_geometry(t.get("geometry"))
             reading_dict: dict[str, Any] | None = None
             rate_snapshot = None
-            if geometry is not None:
+            if geometry is not None and level_stable is not None:
                 reading = geometry_compute(geometry, level_stable)
                 est = self._rate.setdefault(t["id"], RateEstimator())
                 est.push(reading.volume_bbl, now=now)
@@ -417,7 +421,13 @@ class TankAnalyzer:
                     "minutes_to_empty": rate_snapshot.minutes_to_empty,
                 }
 
-            alarms_state = self._alarms_state(t, level_stable)
+            # Alarms require a real level; null level means "no reading" so
+            # clear any pending alarm state for this tank.
+            alarms_state = (
+                self._alarms_state(t, level_stable)
+                if level_stable is not None
+                else {"hi": False, "lo": False, "hi_pct": None, "lo_pct": None}
+            )
 
             results.append(
                 {
@@ -428,7 +438,7 @@ class TankAnalyzer:
                     "medium_declared": declared_medium or None,
                     "medium_confidence": classification.confidence,
                     "medium_features": classification.features,
-                    "level_pct": round(level_stable, 1),
+                    "level_pct": round(level_stable, 1) if level_stable is not None else None,
                     "level_pct_raw": round(level_pct, 1),
                     "temp_min": round(float(strip.min()), 2),
                     "temp_max": round(float(strip.max()), 2),

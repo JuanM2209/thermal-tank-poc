@@ -145,12 +145,15 @@ class EventDetector:
             # known-good state the operator wants to see settle.
             reliability = r.get("reliability", "ok")
             prev = self._last_level.get(r["id"])
-            if reliability != "uncertain":
-                if prev is None or abs(prev - r["level_pct"]) >= self.min_level_delta:
+            cur_level = r.get("level_pct")
+            # v0.6.3: a null level means "no reading available" (uncertain
+            # cold-start). Nothing to announce.
+            if cur_level is not None and reliability != "uncertain":
+                if prev is None or abs(prev - cur_level) >= self.min_level_delta:
                     SHARED.append_event("level_change", id=r["id"],
-                                        level_pct=r["level_pct"], prev=prev,
+                                        level_pct=cur_level, prev=prev,
                                         reliability=reliability)
-                    self._last_level[r["id"]] = r["level_pct"]
+                    self._last_level[r["id"]] = cur_level
             prev_c = self._last_conf.get(r["id"])
             if prev_c != r["confidence"]:
                 if r["confidence"] == "low":

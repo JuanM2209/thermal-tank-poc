@@ -162,7 +162,7 @@ INDEX_HTML = r"""<!doctype html>
     .inspector-box{position:absolute;border:2px solid #38bdf8;box-shadow:0 0 0 9999px rgba(5,7,10,.55);border-radius:2px;transition:all .18s ease}
     .inspector-box.alert{border-color:#f87171;box-shadow:0 0 0 9999px rgba(40,5,5,.6),0 0 20px rgba(248,113,113,.5)}
     .inspector-line{position:absolute;height:0;border-top:2px dashed #fbbf24;left:0;right:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .inspector-line .tag{background:#fbbf24;color:#000;font-size:.62rem;font-weight:800;padding:3px 8px;border-radius:3px;letter-spacing:.08em;transform:translateY(-50%);font-family:ui-monospace,SFMono-Regular,monospace}
+    .inspector-line .tag{background:#fbbf24;color:#000;font-size:.62rem;font-weight:800;padding:3px 8px;border-radius:3px;letter-spacing:.08em;transform:translateY(-50%);font-family:ui-monospace,SFMono-Regular,monospace;white-space:nowrap;max-width:none}
     .inspector-line.secondary{border-top-color:#a855f7}
     .inspector-line.secondary .tag{background:#a855f7;color:#fff}
     /* v1.8: uncertain reading visualised on the live feed */
@@ -409,10 +409,10 @@ INDEX_HTML = r"""<!doctype html>
             <div class="tank-pct" :class="pctColorClass(t)"
                  x-text="tankHero(t)"></div>
             <div class="tank-sub" x-text="tankSubLine1(t)"></div>
-            <div class="tank-sub" style="margin-top:2px" x-text="tankSubLine2(t)"></div>
-            <!-- v1.8: reliability note appears only when detector is
-                 unsure (edge artifact, noisy, temporal spike). Operator
-                 sees at a glance that the number should not be trusted. -->
+            <!-- v0.6.3: reliability note kept tight so action buttons
+                 (Inspect / Why? / Edit / Remove) stay on-screen. The
+                 full capacity/geometry details live in the "geometry &
+                 roi" fold below. -->
             <div class="reliability-note" :class="t.reliability"
                  x-show="t.reliability==='uncertain' || t.reliability==='empty'"
                  x-text="reliabilityNote(t)"></div>
@@ -518,7 +518,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.8</span>
+    <span>Operator Console v1.9</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -769,7 +769,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.8 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.9 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -1750,8 +1750,11 @@ function app(){
     inspectorPrimaryLabel(){
       const t = this.inspectedTank();
       if (!t) return '';
-      if (t.reliability === 'empty')     return 'EMPTY (no thermal contrast)';
-      if (t.reliability === 'uncertain') return 'LEVEL UNCERTAIN \u2014 showing last stable reading';
+      // v0.6.3: keep the label compact so the tag stays on ONE line even
+      // for narrow ROIs. The .reliability-note on the card already tells
+      // the operator WHY it's uncertain.
+      if (t.reliability === 'empty')     return 'EMPTY';
+      if (t.reliability === 'uncertain') return 'UNCERTAIN';
       const pct = (t.level_pct != null ? t.level_pct.toFixed(1) : '--') + '%';
       const ft = t.reading?.level_ft != null ? (' \u00b7 ' + t.reading.level_ft.toFixed(2) + ' ft') : '';
       const bbl = t.reading?.volume_bbl != null ? (' \u00b7 ' + Math.round(t.reading.volume_bbl) + ' BBL') : '';
