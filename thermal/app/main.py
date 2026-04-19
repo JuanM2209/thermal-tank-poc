@@ -176,6 +176,11 @@ def main():
     local_reload_seen = 0
     last_seen_seq = -1
     event_det = EventDetector(min_level_delta=cfg["analysis"].get("level_event_delta", 5.0))
+    # Pipeline stride — process 1 of every N camera frames. On the i.MX6 the
+    # 25 fps pipeline saturates the CPU; stride=3 brings us to ~8 fps, freeing
+    # enough core to stay stable over long runs. Tank levels change over
+    # seconds, so downsampling here is visually invisible.
+    pipeline_stride = max(1, int(cfg["analysis"].get("pipeline_stride", 1)))
     open("/tmp/alive", "w").close()
 
     # Rolling per-stage latency budget (ms). Logged every 50 frames so we can
@@ -189,11 +194,15 @@ def main():
         try:
             # Wait for a *new* frame from the background capture thread,
             # instead of driving capture synchronously on this thread.
+            # With pipeline_stride=N we only accept every Nth new seq,
+            # which throttles CPU-bound pipeline stages without losing
+            # the latest camera frame.
             t_wait_start = time.perf_counter()
             visual_raw = thermal_raw = None
+            target_seq = last_seen_seq + pipeline_stride if last_seen_seq >= 0 else -1
             while running["v"]:
                 seq = cap.latest_seq()
-                if seq != last_seen_seq:
+                if seq > target_seq:
                     visual_raw, thermal_raw = cap.read()
                     if thermal_raw is not None:
                         last_seen_seq = seq

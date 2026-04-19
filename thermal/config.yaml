@@ -32,6 +32,10 @@ analysis:
   # the Node-RED chart from filling with garbage 0/100 spikes when the ROI
   # is not pointing at a real tank wall.
   publish_only_high_confidence: true
+  # Process every Nth camera frame. Camera is 25 fps; stride=3 => pipeline
+  # at ~8 fps, which keeps CPU under ~40% of one core on the i.MX6 Nucleus.
+  # Tank levels change slowly, so this has no effect on measurement accuracy.
+  pipeline_stride: 3
 
 tanks:
   # Placeholder ROIs — will be set after the camera points at real tanks.
