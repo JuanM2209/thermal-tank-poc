@@ -25,11 +25,16 @@ from typing import Any
 
 import numpy as np
 
-from classifier import MediumClassifier
+from classifier import Classification, MediumClassifier
 from geometry import Geometry, compute as geometry_compute, parse_geometry, volume_ft3_at_level, ft3_to_bbl
 from rate import RateEstimator
 
 log = logging.getLogger("analyzer")
+
+# Water-vs-oil classification is a statistical read across ~60 s of scene
+# history — it has no meaningful frame-to-frame variation, so we only pay its
+# cost once per second and cache the result per tank.
+CLASSIFY_INTERVAL_S = 1.0
 
 
 class TankAnalyzer:
@@ -49,6 +54,8 @@ class TankAnalyzer:
             t["id"]: deque(maxlen=history) for t in tanks_config
         }
         self._classifier = MediumClassifier()
+        self._classify_cache: dict[str, Classification] = {}
+        self._classify_next_at: dict[str, float] = {}
         self._rate: dict[str, RateEstimator] = {
             t["id"]: RateEstimator() for t in tanks_config
         }
@@ -102,8 +109,18 @@ class TankAnalyzer:
             confidence = "high" if peak_val >= min_delta else "low"
 
             mean_inside = float(strip.mean())
+            # Observe every frame (it's O(1) and feeds the temporal stdev),
+            # but run the full classification at most once per second per tank.
             self._classifier.observe(t["id"], now, mean_inside)
-            classification = self._classifier.classify(t["id"], thermal, r)
+            tid = t["id"]
+            next_at = self._classify_next_at.get(tid, 0.0)
+            cached = self._classify_cache.get(tid)
+            if cached is None or now >= next_at:
+                classification = self._classifier.classify(tid, thermal, r)
+                self._classify_cache[tid] = classification
+                self._classify_next_at[tid] = now + CLASSIFY_INTERVAL_S
+            else:
+                classification = cached
             declared_medium = t.get("medium")
             medium = declared_medium or classification.medium
 

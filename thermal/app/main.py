@@ -174,18 +174,34 @@ def main():
     fps_window = deque(maxlen=30)
     last_tick = time.time()
     local_reload_seen = 0
+    last_seen_seq = -1
     event_det = EventDetector(min_level_delta=cfg["analysis"].get("level_event_delta", 5.0))
     open("/tmp/alive", "w").close()
+
+    # Rolling per-stage latency budget (ms). Logged every 50 frames so we can
+    # see exactly which stage regresses when the scene changes.
+    stage_ms = {"wait": 0.0, "analyze": 0.0, "render": 0.0, "overlay": 0.0, "publish": 0.0, "share": 0.0}
 
     frozen_thermal = None
     frozen_visual = None
 
     while running["v"]:
         try:
-            visual_raw, thermal_raw = cap.read()
+            # Wait for a *new* frame from the background capture thread,
+            # instead of driving capture synchronously on this thread.
+            t_wait_start = time.perf_counter()
+            visual_raw = thermal_raw = None
+            while running["v"]:
+                seq = cap.latest_seq()
+                if seq != last_seen_seq:
+                    visual_raw, thermal_raw = cap.read()
+                    if thermal_raw is not None:
+                        last_seen_seq = seq
+                        break
+                time.sleep(0.01)
             if thermal_raw is None:
-                time.sleep(0.05)
                 continue
+            stage_ms["wait"] += (time.perf_counter() - t_wait_start) * 1000.0
             frame_count += 1
 
             # ---- live config (possibly just mutated via HTTP) ----
@@ -224,9 +240,12 @@ def main():
                     visual = transform(visual, rot, flip_h, flip_v)
 
             # ---- analyze ----
+            t0 = time.perf_counter()
             results = analyzer.analyze(thermal)
+            stage_ms["analyze"] += (time.perf_counter() - t0) * 1000.0
 
             # ---- palette render (optionally pinned range) ----
+            t0 = time.perf_counter()
             palette_name = stream_cfg.get("palette", "iron")
             source = stream_cfg.get("source", "thermal")
             rmin = stream_cfg.get("range_min")
@@ -250,8 +269,10 @@ def main():
                 )
 
             hot, cold = find_hot_cold(thermal)
+            stage_ms["render"] += (time.perf_counter() - t0) * 1000.0
 
             # ---- overlay ----
+            t0 = time.perf_counter()
             fps_now = 0.0
             if len(fps_window) > 1:
                 fps_now = (len(fps_window) - 1) / max(1e-3, fps_window[-1] - fps_window[0])
@@ -269,8 +290,10 @@ def main():
                 temp_unit=cfg.get("ui", {}).get("temp_unit", "C"),
                 upscale=upscale,
             )
+            stage_ms["overlay"] += (time.perf_counter() - t0) * 1000.0
 
             # ---- publish to Node-RED ----
+            t0 = time.perf_counter()
             now = time.time()
             only_hi = cfg.get("analysis", {}).get("publish_only_high_confidence", False)
             if results and (now - last_publish) >= interval:
@@ -285,8 +308,10 @@ def main():
 
             # ---- events ----
             event_det.scan(results)
+            stage_ms["publish"] += (time.perf_counter() - t0) * 1000.0
 
             # ---- share with web layer ----
+            t0 = time.perf_counter()
             SHARED.publish(
                 thermal=thermal, visual=visual, rendered=rendered,
                 rendered_upscale=upscale,
@@ -298,10 +323,22 @@ def main():
             # ---- video recording ----
             if recorder.recording:
                 recorder.write(rendered)
+            stage_ms["share"] += (time.perf_counter() - t0) * 1000.0
 
             if frame_count % 50 == 0:
                 os.utime("/tmp/alive", None)
-                log.info(f"frame#{frame_count} fps={fps_now:.1f} tanks={len(results)} tmin={tmin:.1f} tmax={tmax:.1f}")
+                avg = {k: v / 50.0 for k, v in stage_ms.items()}
+                cap_stats = cap.stats()
+                log.info(
+                    f"frame#{frame_count} fps={fps_now:.1f} tanks={len(results)} "
+                    f"tmin={tmin:.1f} tmax={tmax:.1f} "
+                    f"stage_ms(avg)=wait:{avg['wait']:.1f} analyze:{avg['analyze']:.1f} "
+                    f"render:{avg['render']:.1f} overlay:{avg['overlay']:.1f} "
+                    f"publish:{avg['publish']:.1f} share:{avg['share']:.1f} "
+                    f"cap(seq={cap_stats['seq']} stale={cap_stats['last_frame_age_s']}s reopens={cap_stats['reopens']})"
+                )
+                for k in stage_ms:
+                    stage_ms[k] = 0.0
 
         except KeyboardInterrupt:
             break
