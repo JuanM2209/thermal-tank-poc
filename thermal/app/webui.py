@@ -58,18 +58,38 @@ INDEX_HTML = r"""<!doctype html>
     .tank-status.warning{background:rgba(245,158,11,.14);color:#fbbf24;border:1px solid #92400e}
     .tank-status.alert{background:rgba(239,68,68,.16);color:#f87171;border:1px solid #991b1b}
     .tank-status.lo{background:#1e293b;color:#94a3b8;border:1px solid #334155}
-    /* v1.8 reliability chips */
+    /* v1.10 reliability chips — "uniform" replaces the old "empty"
+       state (we can't distinguish empty from full-and-uniformly-heated
+       without a reference, so we refuse to guess). */
     .tank-status.uncertain{background:rgba(234,179,8,.12);color:#facc15;border:1px solid #854d0e;animation:uncertainPulse 2s ease-in-out infinite}
-    .tank-status.empty{background:rgba(100,116,139,.15);color:#cbd5e1;border:1px solid #475569}
+    .tank-status.uniform{background:rgba(100,116,139,.15);color:#cbd5e1;border:1px solid #475569}
     @keyframes uncertainPulse{0%,100%{opacity:1}50%{opacity:.55}}
     .tank-card.uncertain{border-color:#854d0e;box-shadow:0 0 0 1px #ca8a04 inset}
+    .tank-card.uniform{border-color:#475569}
     /* Diagonal-hatch fill when reliability is uncertain — signals "do not
-       trust this number" without blanking the card entirely. */
+       trust this number" without blanking the card entirely. Uniform
+       ROIs get a flat dim strip so the operator sees "no reading"
+       clearly. */
     .fill-col .fill.uncertain{background:repeating-linear-gradient(135deg,#facc15 0 6px,#713f12 6px 12px);opacity:.65}
+    .fill-col .fill.uniform{background:#334155;opacity:.55}
     .tank-pct.uncertain{color:#facc15}
-    .tank-pct.empty{color:#94a3b8}
+    .tank-pct.uniform{color:#94a3b8}
     .reliability-note{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#facc15;margin-top:4px}
-    .reliability-note.empty{color:#94a3b8}
+    .reliability-note.uniform{color:#94a3b8}
+
+    /* v1.10 phase bar — horizontal strip showing up to 4 thermal bands
+       (gas / oil / water). Rendered below the hero cell so the whole
+       tank cross-section is glanceable without opening the inspector.
+       Segments use flex:<thickness_pct> so widths sum to 100%. */
+    .phase-bar{display:flex;width:100%;height:18px;border-radius:4px;overflow:hidden;border:1px solid #1f2937;margin:0 0 10px 0}
+    .phase-seg{display:flex;align-items:center;justify-content:center;color:#0b1220;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;min-width:14px}
+    .phase-seg span{padding:0 4px;text-shadow:0 0 2px rgba(255,255,255,.4)}
+    .phase-gas{background:linear-gradient(180deg,#64748b,#475569);color:#e2e8f0}
+    .phase-oil{background:linear-gradient(180deg,#f59e0b,#b45309);color:#1c1917}
+    .phase-water{background:linear-gradient(180deg,#38bdf8,#0369a1);color:#0c1526}
+    .phase-liquid{background:linear-gradient(180deg,#a78bfa,#6d28d9);color:#1e1b4b}
+    .phase-uniform{background:#334155;color:#94a3b8}
+    .phase-seg[class*="phase-layer_"]{background:linear-gradient(180deg,#94a3b8,#475569);color:#e2e8f0}
 
     .tank-body{display:grid;grid-template-columns:40px 1fr;gap:14px;align-items:stretch;margin-bottom:12px}
     .fill-col{position:relative;border-radius:6px;overflow:hidden;background:#050a0f;border:1px solid #1f2937;min-height:96px}
@@ -409,14 +429,28 @@ INDEX_HTML = r"""<!doctype html>
             <div class="tank-pct" :class="pctColorClass(t)"
                  x-text="tankHero(t)"></div>
             <div class="tank-sub" x-text="tankSubLine1(t)"></div>
-            <!-- v0.6.3: reliability note kept tight so action buttons
+            <!-- v1.10: reliability note kept tight so action buttons
                  (Inspect / Why? / Edit / Remove) stay on-screen. The
                  full capacity/geometry details live in the "geometry &
                  roi" fold below. -->
             <div class="reliability-note" :class="t.reliability"
-                 x-show="t.reliability==='uncertain' || t.reliability==='empty'"
+                 x-show="t.reliability==='uncertain' || t.reliability==='uniform'"
                  x-text="reliabilityNote(t)"></div>
           </div>
+        </div>
+
+        <!-- v1.10 phase bar: Oil/Water/Gas (or any multi-peak ROI) shows
+             each band with its positional label and mean temperature.
+             Single-band ROIs render a solid uniform strip and are hidden
+             by x-show when no real interface was detected. -->
+        <div class="phase-bar" x-show="(t.phases||[]).length >= 2">
+          <template x-for="p in (t.phases||[])" :key="p.label+p.pct_top">
+            <div class="phase-seg" :class="'phase-'+p.label"
+                 :style="'flex:'+p.thickness_pct"
+                 :title="p.label + ' — ' + p.pct_top + '%..' + p.pct_bottom + '% · ' + p.temp_mean + '\u00b0C'">
+              <span x-text="p.label"></span>
+            </div>
+          </template>
         </div>
 
         <div class="tank-row">
@@ -518,7 +552,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.9</span>
+    <span>Operator Console v1.10</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -733,11 +767,23 @@ INDEX_HTML = r"""<!doctype html>
     <!-- Display timezone -->
     <section>
       <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Overlay timezone</div>
-      <input class="w-full bg-black/40 border border-[#1f2630] rounded px-2 py-1"
-             placeholder="America/Chicago"
-             :value="config?.stream?.overlay?.display_tz || ''"
-             @change="patch({stream:{overlay:{display_tz: $event.target.value || null}}})">
-      <p class="text-[10px] text-slate-500 mt-1">IANA name. Blank = container local tz.</p>
+      <select class="w-full bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+              :value="tzSelectValue()"
+              @change="onTzPresetChange($event.target.value)">
+        <template x-for="p in tzPresets" :key="p.value">
+          <option :value="p.value" x-text="p.label"></option>
+        </template>
+      </select>
+      <div x-show="tzSelectValue()==='custom'" class="mt-2">
+        <input class="w-full bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+               placeholder="e.g. America/Phoenix, Europe/Berlin"
+               :value="config?.stream?.overlay?.display_tz || ''"
+               @change="onTzCustomChange($event.target.value)">
+        <p class="text-[10px] text-slate-500 mt-1">Enter a valid IANA name.</p>
+      </div>
+      <p class="text-[10px] text-slate-500 mt-1" x-show="tzSelectValue()!=='custom'">
+        Applied to the timestamp burnt into the stream overlay.
+      </p>
     </section>
 
     <!-- Publisher -->
@@ -769,7 +815,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.9 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.10 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -961,7 +1007,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="hd">Reliability</div>
           <div class="val" x-text="(why.live?.reliability||'ok').toUpperCase()"
                :class="why.live?.reliability==='ok'?'text-emerald-400'
-                      : why.live?.reliability==='empty'?'text-slate-300'
+                      : why.live?.reliability==='uniform'?'text-slate-300'
                       : 'text-amber-400'"></div>
           <div class="text-[10px] mt-1 text-slate-400"
                x-text="(why.live?.reliability_reasons||[]).join(', ') || (why.live?.reliability==='ok'?'all checks passed':'')"></div>
@@ -1026,6 +1072,22 @@ function app(){
       'center_crosshair','grid',
     ],
 
+    // v1.10: timezone dropdown presets. Operators in West Texas run on
+    // Central Time; the free-form field in v1.9 let typos ("Central",
+    // "CT") slip through and the overlay silently stayed in UTC.
+    tzPresets: [
+      { value: '',                    label: 'Container local (no override)' },
+      { value: 'UTC',                 label: 'UTC' },
+      { value: 'America/Chicago',     label: 'Central Time \u2014 Chicago / West Texas (CT)' },
+      { value: 'America/Denver',      label: 'Mountain Time \u2014 Denver (MT)' },
+      { value: 'America/Phoenix',     label: 'Mountain (no DST) \u2014 Phoenix' },
+      { value: 'America/Los_Angeles', label: 'Pacific Time \u2014 Los Angeles (PT)' },
+      { value: 'America/New_York',    label: 'Eastern Time \u2014 New York (ET)' },
+      { value: 'America/Anchorage',   label: 'Alaska Time' },
+      { value: 'Pacific/Honolulu',    label: 'Hawaii' },
+      { value: 'custom',              label: 'Custom IANA name\u2026' },
+    ],
+
     // measurement tools
     tool: 'select',
     measurements: [],     // {id,label,kind,coords,color,min,avg,max,count}
@@ -1036,7 +1098,13 @@ function app(){
     // stable stream URL — set ONCE at data-init. A getter would re-evaluate
     // on every Alpine reactive tick and, with a cache-buster, would replace
     // the <img> src every few seconds, killing the ongoing MJPEG connection.
+    // Bump via kickStream() when we detect the stream has frozen (v1.10
+    // watchdog).
     streamUrl: '/stream.mjpg?t=' + Date.now(),
+    // v1.10: timestamp (ms) of the most recent MJPEG frame. Used by the
+    // stream watchdog to detect a dropped MJPEG connection (common after
+    // rapid settings patches on low-power devices) and force-reconnect.
+    _lastFrameTs: Date.now(),
 
     // derived
     get deviceHost(){ return location.host.replace(/\/$/,''); },
@@ -1062,6 +1130,9 @@ function app(){
       setInterval(()=>this.pollRecording(), 2000);
       setInterval(()=>this.refreshMeasurements(), 1500);
       setInterval(()=>this.fetchAlerts(), 3000);
+      // v1.10: 2s stream watchdog — detects MJPEG freezes triggered by
+      // rapid settings-drawer toggles and reconnects.
+      setInterval(()=>this.kickStream(), 2000);
       window.addEventListener('resize', () => this.syncCanvas());
       window.addEventListener('keydown', (e) => this.onKey(e));
       // Canvas gets its size from the <img> once it loads.
@@ -1107,13 +1178,35 @@ function app(){
       await this.patch({ui:{level_unit:u}});
     },
 
+    // v1.10 timezone picker helpers
+    tzSelectValue(){
+      const cur = this.config?.stream?.overlay?.display_tz || '';
+      // Match against presets; if the saved value doesn't match a preset,
+      // we're in "custom" mode and the hidden text input holds the value.
+      const known = this.tzPresets.some(p => p.value === cur && p.value !== 'custom');
+      if (known) return cur;
+      if (cur) return 'custom';
+      return '';
+    },
+    async onTzPresetChange(v){
+      // Picking a preset (not "custom") writes that IANA name verbatim.
+      // Picking "container local" (empty string) clears the override.
+      if (v === 'custom') return;           // wait for the custom input
+      const tz = v || null;
+      await this.patch({stream:{overlay:{display_tz: tz}}});
+    },
+    async onTzCustomChange(v){
+      const tz = (v || '').trim() || null;
+      await this.patch({stream:{overlay:{display_tz: tz}}});
+    },
+
     // -------------------- SCADA tank card helpers --------------------
     tankStatus(t){
-      // v1.8: reliability trumps the level-based status classifier.
-      // An uncertain reading should not also claim "Warning" or "Alert"
-      // from a bogus level_pct.
+      // v1.10: reliability trumps the level-based status classifier.
+      // An uncertain or uniform reading should not also claim "Warning"
+      // or "Alert" from a bogus level_pct.
       if (t.reliability === 'uncertain') return { klass:'uncertain', label:'Uncertain' };
-      if (t.reliability === 'empty')     return { klass:'empty',     label:'Empty'     };
+      if (t.reliability === 'uniform')   return { klass:'uniform',   label:'Uniform'   };
       const p = t.level_pct || 0;
       if (t.confidence !== 'high') return { klass:'lo', label:'Low Conf' };
       if (p < 10 || p > 95) return { klass:'alert', label:'Alert' };
@@ -1127,23 +1220,25 @@ function app(){
       if (s.klass === 'alert') cls.push('alert');
       else if (s.klass === 'warning') cls.push('warning');
       else if (s.klass === 'uncertain') cls.push('uncertain');
+      else if (s.klass === 'uniform')   cls.push('uniform');
       return cls.join(' ');
     },
     fillColorClass(t){
       const s = this.tankStatus(t);
       if (s.klass === 'uncertain') return 'uncertain';
+      if (s.klass === 'uniform')   return 'uniform';
       if (s.klass === 'alert') return 'alert';
       return t.medium || 'unknown';
     },
     pctColorClass(t){
       const s = this.tankStatus(t);
       if (s.klass === 'uncertain') return 'uncertain';
-      if (s.klass === 'empty')     return 'empty';
+      if (s.klass === 'uniform')   return 'uniform';
       if (s.klass === 'alert') return 'alert';
       return t.medium || 'unknown';
     },
 
-    // v1.8: hero readout respects the user-chosen primary unit.
+    // v1.10: hero readout respects the user-chosen primary unit.
     // config.ui.display_primary: percent | barrels | feet | inches
     tankHero(t){
       if (t.level_pct == null) return '--';
@@ -1173,7 +1268,7 @@ function app(){
       return 'TOTAL VOLUME CAPACITY  ' + Math.round(full).toLocaleString() + ' BBL';
     },
     reliabilityNote(t){
-      if (t.reliability === 'empty') return 'Tank appears empty (no thermal contrast)';
+      if (t.reliability === 'uniform') return 'Uniform ROI \u2014 no thermal interface visible (empty, full, or uniformly-heated tank)';
       if (t.reliability !== 'uncertain') return '';
       const reasons = t.reliability_reasons || [];
       const friendly = {
@@ -1182,6 +1277,7 @@ function app(){
         noisy_halves:  'inside ROI is not uniform',
         temporal_spike:'reading spiked this frame',
         flat_profile:  'no thermal contrast',
+        uniform_roi:   'no interface visible',
       };
       const msg = reasons.map(r => friendly[r] || r).join(', ') || 'unreliable reading';
       return 'Uncertain: ' + msg;
@@ -1241,7 +1337,25 @@ function app(){
     },
 
     // -------------------- Drawing canvas --------------------
-    onImgLoad(){ this.syncCanvas(); },
+    onImgLoad(){
+      // v1.10: record the frame time so the stream watchdog can detect
+      // a silent MJPEG freeze (no new frames) and force-reconnect.
+      this._lastFrameTs = Date.now();
+      this.syncCanvas();
+    },
+
+    // v1.10 stream watchdog — MJPEG connections occasionally silently
+    // die after a burst of config patches on low-powered ARMv7 devices.
+    // If no frame has decoded in STALL_MS, bump streamUrl to force a
+    // reconnect. We only kick when the page is visible so backgrounded
+    // tabs don't thrash.
+    kickStream(){
+      if (document.hidden) return;
+      const STALL_MS = 4000;
+      if (Date.now() - this._lastFrameTs < STALL_MS) return;
+      this.streamUrl = '/stream.mjpg?t=' + Date.now();
+      this._lastFrameTs = Date.now();  // reset so we don't spam
+    },
     syncCanvas(){
       const img = document.getElementById('mjpeg-img');
       const cv = document.getElementById('draw-canvas');
@@ -1750,10 +1864,10 @@ function app(){
     inspectorPrimaryLabel(){
       const t = this.inspectedTank();
       if (!t) return '';
-      // v0.6.3: keep the label compact so the tag stays on ONE line even
+      // v1.10: keep the label compact so the tag stays on ONE line even
       // for narrow ROIs. The .reliability-note on the card already tells
-      // the operator WHY it's uncertain.
-      if (t.reliability === 'empty')     return 'EMPTY';
+      // the operator WHY it's uncertain or uniform.
+      if (t.reliability === 'uniform')   return 'UNIFORM';
       if (t.reliability === 'uncertain') return 'UNCERTAIN';
       const pct = (t.level_pct != null ? t.level_pct.toFixed(1) : '--') + '%';
       const ft = t.reading?.level_ft != null ? (' \u00b7 ' + t.reading.level_ft.toFixed(2) + ' ft') : '';
@@ -1816,9 +1930,10 @@ function app(){
       }).join(' ');
     },
     sparkStroke(t){
-      // v1.8: amber stroke when reliability is uncertain, gray when empty.
+      // v1.10: amber stroke when reliability is uncertain, gray when the
+      // ROI is uniform (no interface visible).
       if (t.reliability === 'uncertain') return '#facc15';
-      if (t.reliability === 'empty')     return '#94a3b8';
+      if (t.reliability === 'uniform')   return '#94a3b8';
       const m = t.medium || 'unknown';
       if (t.alarms?.hi || t.alarms?.lo) return '#f87171';
       if (m === 'water') return '#22d3ee';
@@ -1890,6 +2005,14 @@ function app(){
       const d = this.why.detail;
       const lv = this.why.live;
       if (!d || !lv) return '';
+      // v1.10: handle the "uniform" verdict explicitly — the explainer
+      // should say "no interface found" instead of inventing a row index.
+      if (lv.reliability === 'uniform') {
+        return 'The ROI is thermally uniform — no clear liquid/air (or oil/water) interface is visible. ' +
+               'This happens when the tank is empty, full of a uniformly-heated liquid, or the ROI is too narrow to capture the surface. ' +
+               'Lower min_temp_delta in Edit to force a reading, or move the ROI to cover both sides of the expected interface.';
+      }
+      const phases = Array.isArray(d.phases) ? d.phases : [];
       const pass = this.whyPeakPass();
       const pct = (lv.level_pct||0).toFixed(1);
       const row = d.peak_idx;
@@ -1897,14 +2020,18 @@ function app(){
       const peak = (d.peak_val||0).toFixed(2);
       const gate = (d.min_temp_delta||0).toFixed(2);
       let s = 'Inside the ROI (' + total + ' rows tall) the sharpest vertical temperature change is at row ' + row +
-              ' — a gradient magnitude of ' + peak + ' \u00b0C/row. ';
+              ' \u2014 a gradient magnitude of ' + peak + ' \u00b0C/row. ';
       if (pass) {
-        s += 'That is above the confidence gate (' + gate + ' \u00b0C/row), so the detector trusts this as the liquid/air interface. ';
+        s += 'That is above the confidence gate (' + gate + ' \u00b0C/row), so the detector trusts this as the primary interface. ';
         s += 'The level is reported as ' + pct + '% of the tank height (ROI bottom \u2192 top).';
       } else {
         s += 'That is BELOW the gate (' + gate + ' \u00b0C/row), so the detector flags the reading as LOW CONFIDENCE. ';
-        s += 'Common causes: the tank is thermally uniform (empty or full), the ROI is too narrow, or ambient is drifting. ';
-        s += 'Lower the min_temp_delta in Edit to accept weaker gradients.';
+        s += 'Common causes: the tank is thermally uniform, the ROI is too narrow, or ambient is drifting. ';
+        s += 'Lower min_temp_delta in Edit to accept weaker gradients.';
+      }
+      if (phases.length >= 2) {
+        const labels = phases.map(p => p.label + ' (' + p.thickness_pct + '%)').join(' / ');
+        s += ' Multi-phase detected: ' + labels + '.';
       }
       return s;
     },

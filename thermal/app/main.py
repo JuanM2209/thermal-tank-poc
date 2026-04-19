@@ -139,16 +139,16 @@ class EventDetector:
 
     def scan(self, results):
         for r in results:
-            # v1.8: suppress level_change spam while the reading is flagged
-            # "uncertain" (edge artifact, noisy halves, temporal spike).
-            # Empty-tank readings still emit because 0% is an actionable,
-            # known-good state the operator wants to see settle.
+            # v1.10: suppress level_change spam while the reading is
+            # "uncertain" (edge artifact, noisy halves, temporal spike) or
+            # "uniform" (no interface visible — level_pct is null). Only
+            # "ok" frames emit level_change events.
             reliability = r.get("reliability", "ok")
             prev = self._last_level.get(r["id"])
             cur_level = r.get("level_pct")
-            # v0.6.3: a null level means "no reading available" (uncertain
-            # cold-start). Nothing to announce.
-            if cur_level is not None and reliability != "uncertain":
+            # A null level means "no reading available" — uniform ROI or
+            # uncertain cold-start. Nothing to announce.
+            if cur_level is not None and reliability == "ok":
                 if prev is None or abs(prev - cur_level) >= self.min_level_delta:
                     SHARED.append_event("level_change", id=r["id"],
                                         level_pct=cur_level, prev=prev,
