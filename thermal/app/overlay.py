@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import cv2
 import numpy as np
@@ -12,10 +13,20 @@ _FONT = cv2.FONT_HERSHEY_SIMPLEX
 _MONO = cv2.FONT_HERSHEY_DUPLEX
 
 
-def _draw_corner_badge(img, fps_actual: float | None) -> None:
+def _resolve_tz(tz_name: str | None):
+    if not tz_name:
+        return None
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return None
+
+
+def _draw_corner_badge(img, fps_actual: float | None, tz_name: str | None = None) -> None:
     """Burn a compact date+time+fps badge into the bottom-right corner."""
-    now = datetime.now()
-    stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    tz = _resolve_tz(tz_name)
+    now = datetime.now(tz) if tz else datetime.now().astimezone()
+    stamp = now.strftime("%Y-%m-%d %H:%M:%S %Z").rstrip()
     fps_str = f"{fps_actual:.0f} fps" if fps_actual is not None else ""
 
     H, W = img.shape[:2]
@@ -144,7 +155,11 @@ def draw_frame_overlay(img, *, tanks, results, tmin, tmax, hot, cold,
     show_ts = overlay_cfg.get("timestamp", True)
     show_fps = overlay_cfg.get("fps_counter", True)
     if show_ts or show_fps:
-        _draw_corner_badge(out, fps_actual if show_fps else None)
+        _draw_corner_badge(
+            out,
+            fps_actual if show_fps else None,
+            tz_name=overlay_cfg.get("display_tz") if show_ts else None,
+        )
 
     return out
 

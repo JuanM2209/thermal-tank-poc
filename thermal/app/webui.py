@@ -130,11 +130,6 @@ INDEX_HTML = r"""<!doctype html>
     <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 via-rose-500 to-indigo-500 flex items-center justify-center font-bold">T</div>
     <div>
       <div class="text-sm font-semibold tracking-wide" x-text="config?.ui?.title || 'Thermal Tank Monitor'"></div>
-      <div class="text-[11px] text-slate-400">
-        <span class="k" x-text="siteId"></span>
-        &middot; <span class="k" x-text="deviceHost"></span>
-        &middot; <span x-text="fpsLabel"></span>
-      </div>
     </div>
   </div>
   <div class="flex items-center gap-2 flex-wrap">
@@ -346,19 +341,31 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <p class="text-sm text-slate-400 mb-3">
       We sampled <span x-text="detect.framesUsed"></span> frames and found <span x-text="detect.candidates.length"></span> candidate(s).
-      Review each, set height and diameter, then accept.
+      Green boxes on the live feed show the detected perimeters — verify each before accepting.
     </p>
-    <div class="flex gap-2 mb-3">
+    <div class="flex gap-2 mb-3 flex-wrap">
       <button class="btn primary" @click="runDetect()" :disabled="detect.running" x-text="detect.running?'Scanning...':'Re-scan'"></button>
       <button class="btn success" @click="acceptDetect()" :disabled="!detect.candidates.length">Accept &amp; save</button>
+      <div class="seg">
+        <button :class="detect.unit==='ft'?'active':''" @click="detect.unit='ft'">ft</button>
+        <button :class="detect.unit==='in'?'active':''" @click="detect.unit='in'">in</button>
+      </div>
+      <span class="text-[11px] text-slate-500 self-center">Height unit for full-scale</span>
     </div>
     <table class="w-full text-xs">
       <thead class="text-left text-slate-400">
-        <tr><th class="p-1">#</th><th>Name</th><th>Medium</th><th>Height ft</th><th>Diameter ft</th><th>ROI</th><th>Conf.</th></tr>
+        <tr>
+          <th class="p-1">#</th><th>Name</th><th>Medium</th>
+          <th>Topic</th>
+          <th>Full-scale (<span x-text="detect.unit"></span>)</th>
+          <th>Dia. ft</th>
+          <th>Perimeter [x,y w&times;h]</th>
+          <th>Conf.</th>
+        </tr>
       </thead>
       <tbody>
         <template x-for="(c,i) in detect.candidates" :key="c.id">
-          <tr class="border-t border-[#1f2630]">
+          <tr class="border-t border-[#1f2630] align-top">
             <td class="p-1 k" x-text="i+1"></td>
             <td><input class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-24" x-model="c.name"></td>
             <td>
@@ -368,9 +375,23 @@ INDEX_HTML = r"""<!doctype html>
                 <option value="unknown">unknown</option>
               </select>
             </td>
-            <td><input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-20" x-model.number="c.geometry.height_ft"></td>
+            <td><input class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-44 k" x-model="c.topic"></td>
+            <td><input type="number" step="0.5" min="0" class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-20"
+                       :value="detect.unit==='in' ? (c.geometry.height_ft*12).toFixed(1) : c.geometry.height_ft"
+                       @change="c.geometry.height_ft = detect.unit==='in' ? (Number($event.target.value)/12) : Number($event.target.value)"></td>
             <td><input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-20" x-model.number="c.geometry.diameter_ft"></td>
-            <td class="k text-slate-500" x-text="'['+c.roi.x+','+c.roi.y+' '+c.roi.w+'x'+c.roi.h+']'"></td>
+            <td>
+              <div class="flex gap-1">
+                <input type="number" min="0" title="x"
+                       class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-14 k" x-model.number="c.roi.x">
+                <input type="number" min="0" title="y"
+                       class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-14 k" x-model.number="c.roi.y">
+                <input type="number" min="1" title="w"
+                       class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-14 k" x-model.number="c.roi.w">
+                <input type="number" min="1" title="h"
+                       class="bg-black/40 border border-[#1f2630] rounded px-1 py-0.5 w-14 k" x-model.number="c.roi.h">
+              </div>
+            </td>
             <td class="k" x-text="Math.round((c.medium_confidence||0)*100)+'%'"></td>
           </tr>
         </template>
@@ -378,6 +399,97 @@ INDEX_HTML = r"""<!doctype html>
     </table>
   </div>
 </div>
+
+<!-- Settings drawer (right slide-in) -->
+<div x-show="panel==='settings'" x-transition.opacity class="fixed inset-0 z-40 modal-bg" @click="panel=null"></div>
+<aside x-show="panel==='settings'" x-transition:enter="transition transform duration-200" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+       x-transition:leave="transition transform duration-150" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
+       class="fixed top-0 right-0 z-50 h-full w-[380px] bg-[#0a0e14] border-l border-[#1f2630] shadow-2xl overflow-y-auto">
+  <div class="sticky top-0 bg-[#0a0e14] border-b border-[#1f2630] px-4 py-3 flex items-center justify-between z-10">
+    <div>
+      <div class="text-sm font-semibold">Settings</div>
+      <div class="text-[11px] text-slate-400 k">
+        <span x-text="siteId"></span> &middot; <span x-text="deviceHost"></span> &middot; <span x-text="fpsLabel"></span>
+      </div>
+    </div>
+    <button class="btn sm" @click="panel=null">Close</button>
+  </div>
+
+  <div class="p-4 space-y-5 text-xs">
+    <!-- Tanks summary -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Tanks</div>
+      <div class="flex items-center justify-between">
+        <div><b class="text-base" x-text="(state.results||[]).length"></b> configured</div>
+        <button class="btn sm primary" @click="panel=null; openDetectModal()">Auto-detect</button>
+      </div>
+    </section>
+
+    <!-- Level unit -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Level display unit</div>
+      <div class="seg">
+        <button :class="unit==='ft'?'active':''" @click="setUnit('ft')">feet</button>
+        <button :class="unit==='in'?'active':''" @click="setUnit('in')">inches</button>
+      </div>
+    </section>
+
+    <!-- Overlay toggles -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Stream overlays</div>
+      <template x-for="k in overlayKeys" :key="k">
+        <label class="flex items-center justify-between py-1">
+          <span class="capitalize" x-text="k.replace(/_/g,' ')"></span>
+          <input type="checkbox" :checked="config?.stream?.overlay?.[k]"
+                 @change="patch({stream:{overlay:{[k]: $event.target.checked}}})">
+        </label>
+      </template>
+    </section>
+
+    <!-- Display timezone -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Overlay timezone</div>
+      <input class="w-full bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+             placeholder="America/Chicago"
+             :value="config?.stream?.overlay?.display_tz || ''"
+             @change="patch({stream:{overlay:{display_tz: $event.target.value || null}}})">
+      <p class="text-[10px] text-slate-500 mt-1">IANA name. Blank = container local tz.</p>
+    </section>
+
+    <!-- Publisher -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Node-RED publisher</div>
+      <label class="flex flex-col gap-1 mb-2"><span class="text-slate-400">Endpoint</span>
+        <input class="bg-black/40 border border-[#1f2630] rounded px-2 py-1 k"
+               :value="config?.publisher?.endpoint || ''"
+               @change="patch({publisher:{endpoint: $event.target.value}})">
+      </label>
+      <label class="flex flex-col gap-1"><span class="text-slate-400">Timeout (s)</span>
+        <input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+               :value="config?.publisher?.timeout || 3"
+               @change="patch({publisher:{timeout: Number($event.target.value)}})">
+      </label>
+      <p class="text-[10px] text-slate-500 mt-1">https:// URLs are supported. Each tank payload includes its <b>topic</b> for Node-RED routing.</p>
+    </section>
+
+    <!-- Capture -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Capture</div>
+      <div class="flex gap-2">
+        <button class="btn sm" @click="snapshot()">Snapshot now</button>
+        <button class="btn sm" :class="recording.recording?'rec':''" @click="toggleRecord()"
+                x-text="recording.recording?'Stop recording':'Start recording'"></button>
+      </div>
+      <p class="text-[10px] text-slate-500 mt-1">Files land in <span class="k">/app/data/</span> on the Nucleus.</p>
+    </section>
+
+    <!-- About -->
+    <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
+      Operator Console v1.4 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      <span x-text="state.w+'x'+state.h"></span>
+    </section>
+  </div>
+</aside>
 
 <!-- Tank edit modal -->
 <div x-show="editor.show" x-transition class="fixed inset-0 z-50 modal-bg flex items-center justify-center p-6">
@@ -397,15 +509,46 @@ INDEX_HTML = r"""<!doctype html>
           <option value="unknown">unknown</option>
         </select>
       </label>
-      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Height ft</span>
-        <input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.geometry.height_ft">
+      <label class="flex flex-col gap-1 col-span-2"><span class="text-slate-400 text-xs">Node-RED topic (routing label)</span>
+        <input class="bg-black/40 border border-[#1f2630] rounded px-2 py-1 k" placeholder="nucleus/n-1065/water_tank_1" x-model="editor.tank.topic">
+      </label>
+
+      <!-- Scale calibration: 0-100% maps to 0-Height in selected unit -->
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Height unit</span>
+        <select class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model="editor.heightUnit">
+          <option value="ft">feet</option>
+          <option value="in">inches</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Height (full-scale of 100%)</span>
+        <input type="number" step="0.1" min="0" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.heightValue">
       </label>
       <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Diameter ft</span>
         <input type="number" step="0.5" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.geometry.diameter_ft">
       </label>
-      <label class="flex flex-col gap-1 col-span-2"><span class="text-slate-400 text-xs">Min temp delta C (confidence gate)</span>
+      <label class="flex flex-col gap-1"><span class="text-slate-400 text-xs">Min temp delta C (confidence gate)</span>
         <input type="number" step="0.1" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.min_temp_delta">
       </label>
+
+      <!-- Perimeter / ROI -->
+      <div class="col-span-2 pt-2 border-t border-[#1f2630]">
+        <div class="text-slate-400 text-xs mb-2 uppercase tracking-wider">Perimeter (pixel ROI)</div>
+        <div class="grid grid-cols-4 gap-2">
+          <label class="flex flex-col gap-1"><span class="text-slate-500 text-[10px]">x</span>
+            <input type="number" min="0" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.roi.x">
+          </label>
+          <label class="flex flex-col gap-1"><span class="text-slate-500 text-[10px]">y</span>
+            <input type="number" min="0" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.roi.y">
+          </label>
+          <label class="flex flex-col gap-1"><span class="text-slate-500 text-[10px]">w</span>
+            <input type="number" min="1" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.roi.w">
+          </label>
+          <label class="flex flex-col gap-1"><span class="text-slate-500 text-[10px]">h</span>
+            <input type="number" min="1" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.roi.h">
+          </label>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-1">Draw a box on the live view with the <b>[ ]</b> tool to get coordinates, then paste here.</p>
+      </div>
     </div>
     <div class="flex gap-2 mt-4">
       <button class="btn primary" @click="saveEditor()">Save</button>
@@ -428,8 +571,15 @@ function app(){
     live: false,
     banner: null,
     calibrating: false,
-    detect: { modal:false, show:false, running:false, framesUsed:0, candidates:[] },
-    editor: { show:false, tank:null },
+    detect: { modal:false, show:false, running:false, framesUsed:0, candidates:[], unit:'ft' },
+    editor: { show:false, tank:null, heightValue:0, heightUnit:'ft' },
+
+    // Settings drawer: which overlay toggles to show
+    overlayKeys: [
+      'roi_boxes','level_line','min_marker','max_marker',
+      'tank_labels','temp_scale','fps_counter','timestamp',
+      'center_crosshair','grid',
+    ],
 
     // measurement tools
     tool: 'select',
@@ -768,28 +918,51 @@ function app(){
     },
 
     // -------------------- detect / calibrate / tanks --------------------
-    async openDetectModal(){ this.detect.modal = true; await this.runDetect(); },
+    async openDetectModal(){
+      this.detect.unit = this.unit || 'ft';
+      this.detect.modal = true;
+      await this.runDetect();
+    },
     async runDetect(){
       this.detect.running = true;
       try {
         const r = await fetch('/api/detect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({max:6, samples:20, timeout_s:6})});
         const j = await r.json();
         this.detect.framesUsed = j.frames_used || 0;
-        this.detect.candidates = (j.candidates||[]).map(c => ({
-          ...c,
-          geometry: { height_ft: 20, diameter_ft: 10, shape: 'vertical_cylinder' }
-        }));
+        // Merge with any existing candidate so user-edited fields (topic,
+        // height_ft override) survive a re-scan when the id matches.
+        const existing = new Map(this.detect.candidates.map(c => [c.id, c]));
+        const site = this.siteId.toLowerCase().replace(/[^a-z0-9]+/g,'-');
+        this.detect.candidates = (j.candidates||[]).map(c => {
+          const prior = existing.get(c.id) || {};
+          return {
+            ...c,
+            topic: prior.topic || ('nucleus/' + site + '/' + c.id),
+            geometry: prior.geometry || { height_ft: 20, diameter_ft: 10, shape: 'vertical_cylinder' },
+          };
+        });
         this.detect.show = true;
       } catch(e){ this.banner = 'Auto-detect failed: ' + e; }
       this.detect.running = false;
     },
     async acceptDetect(){
       const body = { tanks: this.detect.candidates.map(c => ({
-        id: c.id, name: c.name, medium: c.medium, roi: c.roi,
-        geometry: c.geometry, min_temp_delta: c.min_temp_delta || 0.8,
+        id: c.id,
+        name: c.name,
+        medium: c.medium,
+        topic: (c.topic || '').trim() || null,
+        roi: {
+          x: Math.max(0, Math.round(c.roi.x || 0)),
+          y: Math.max(0, Math.round(c.roi.y || 0)),
+          w: Math.max(1, Math.round(c.roi.w || 1)),
+          h: Math.max(1, Math.round(c.roi.h || 1)),
+        },
+        geometry: c.geometry,
+        min_temp_delta: c.min_temp_delta || 0.8,
       }))};
       await fetch('/api/detect/accept', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
       this.detect.modal = false; this.detect.show = false;
+      this.banner = 'Saved ' + body.tanks.length + ' tank(s). Perimeters and topics applied.';
       await this.reloadConfig();
     },
     async runCalibrate(){
@@ -817,18 +990,48 @@ function app(){
       await this.pollRecording();
     },
     editTank(t){
-      this.editor.tank = JSON.parse(JSON.stringify(Object.assign({
+      const staged = JSON.parse(JSON.stringify(Object.assign({
         geometry:{height_ft:20, diameter_ft:10, shape:'vertical_cylinder'},
-        min_temp_delta: 1.0
+        roi:{x:0, y:0, w:40, h:170},
+        topic:'',
+        min_temp_delta: 1.0,
       }, t)));
+      staged.topic = staged.topic || '';
+      staged.roi = Object.assign({x:0,y:0,w:40,h:170}, staged.roi || {});
+      staged.geometry = Object.assign({height_ft:20,diameter_ft:10,shape:'vertical_cylinder'}, staged.geometry || {});
+      this.editor.tank = staged;
+      // Seed scale inputs from whatever unit the UI currently prefers.
+      const ft = Number(staged.geometry.height_ft) || 0;
+      this.editor.heightUnit = this.unit === 'in' ? 'in' : 'ft';
+      this.editor.heightValue = this.editor.heightUnit === 'in' ? +(ft * 12).toFixed(2) : ft;
       this.editor.show = true;
     },
     async saveEditor(){
       const t = this.editor.tank;
-      await fetch('/api/tanks/'+encodeURIComponent(t.id), {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
-        name: t.name, medium: t.medium, geometry: t.geometry, min_temp_delta: t.min_temp_delta
-      })});
+      // Normalise the user-entered scale back to feet (canonical unit).
+      const val = Number(this.editor.heightValue) || 0;
+      const heightFt = this.editor.heightUnit === 'in' ? +(val / 12).toFixed(3) : val;
+      t.geometry = Object.assign({}, t.geometry, { height_ft: heightFt });
+      const body = {
+        name: t.name,
+        medium: t.medium,
+        topic: (t.topic || '').trim() || null,
+        roi: {
+          x: Math.max(0, Math.round(t.roi?.x || 0)),
+          y: Math.max(0, Math.round(t.roi?.y || 0)),
+          w: Math.max(1, Math.round(t.roi?.w || 1)),
+          h: Math.max(1, Math.round(t.roi?.h || 1)),
+        },
+        geometry: t.geometry,
+        min_temp_delta: t.min_temp_delta,
+      };
+      await fetch('/api/tanks/'+encodeURIComponent(t.id), {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body),
+      });
       this.editor.show = false;
+      this.banner = 'Saved ' + t.id + ' (scale 0-100% = 0-' + val + ' ' + this.editor.heightUnit + ')';
       await this.reloadConfig();
     },
     async removeTank(id){

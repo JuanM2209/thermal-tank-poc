@@ -22,7 +22,7 @@ BACKOFF_MAX_S = 30.0
 FAILS_BEFORE_BACKOFF = 2
 WARN_EVERY_N_FAILS = 50  # Only log one warning every N consecutive failures.
 PAYLOAD_FIELDS = (
-    "id", "name", "medium", "medium_declared", "medium_confidence",
+    "id", "name", "topic", "medium", "medium_declared", "medium_confidence",
     "level_pct", "level_pct_raw",
     "temp_min", "temp_max", "temp_avg",
     "gradient_peak", "confidence",

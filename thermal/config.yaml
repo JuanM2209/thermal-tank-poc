@@ -40,8 +40,11 @@ analysis:
 tanks:
   # Placeholder ROIs — will be set after the camera points at real tanks.
   # You can also draw them interactively on the web dashboard (pencil icon).
+  # `topic` is a routing label forwarded to Node-RED in the publish payload.
+  # Use it to route readings to the right table / dashboard in your flow.
   - id: tank_01
     name: "Tank 1"
+    topic: "nucleus/n-1065/water_tank_1"
     medium: water
     roi: { x: 30,  y: 10, w: 40, h: 170 }
     min_temp_delta: 1.2
@@ -51,6 +54,7 @@ tanks:
       shape: vertical_cylinder
   - id: tank_02
     name: "Tank 2"
+    topic: "nucleus/n-1065/oil_tank_1"
     medium: oil
     roi: { x: 140, y: 10, w: 40, h: 170 }
     min_temp_delta: 1.0
@@ -108,6 +112,9 @@ stream:
     fps_counter: true
     tank_labels: true
     timestamp: true        # date+time badge burned into top-left corner
+    # IANA tz name for the overlay timestamp (e.g. "America/Chicago", "UTC",
+    # "Asia/Tokyo"). When null, uses the container's local tz.
+    display_tz: "America/Chicago"
   # Video recording destination (inside the container; /app/data is mounted to host)
   recording_dir: /app/data/recordings
   snapshot_dir:  /app/data/snapshots

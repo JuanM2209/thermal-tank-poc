@@ -154,6 +154,7 @@ class TankAnalyzer:
                 {
                     "id": t["id"],
                     "name": t["name"],
+                    "topic": t.get("topic"),
                     "medium": medium,
                     "medium_declared": declared_medium or None,
                     "medium_confidence": classification.confidence,
