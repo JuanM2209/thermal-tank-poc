@@ -37,7 +37,7 @@ from flask import Flask, Response, abort, jsonify, request, send_file
 
 import detect as detector
 from calibration import as_config_patch, calibrate
-from state import SHARED
+from state import PERF, SHARED
 from webui import INDEX_HTML
 
 log = logging.getLogger("stream")
@@ -218,6 +218,14 @@ class WebServer:
             self._deep_merge(new_tanks[idx], patch)
             self.apply_patch({"tanks": new_tanks})
             return jsonify(new_tanks[idx])
+
+        @app.route("/api/stats")
+        def api_stats():
+            """Diagnostic: last 50-frame window averages for each pipeline stage
+            plus V4L2 read/decode timings and capture liveness. Used to find
+            which stage is throttling the frame rate without needing a shell.
+            """
+            return jsonify(PERF.snapshot())
 
         @app.route("/api/events")
         def api_events():

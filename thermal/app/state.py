@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -86,3 +87,51 @@ class SharedState:
 
 
 SHARED = SharedState()
+
+
+class PerfStats:
+    """Lock-guarded per-stage latency + capture telemetry snapshot for /api/stats.
+
+    Single writer (main loop), many readers (Flask). Holds the most recent
+    50-frame window of average stage times (ms) so the dashboard can see
+    exactly which stage is eating the frame budget.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_window: dict[str, Any] = {
+            "window_ts": 0.0,
+            "window_frames": 0,
+            "fps": 0.0,
+            "frame_idx": 0,
+            "stage_ms_avg": {},
+            "cap": {},
+            "reader": {},
+        }
+
+    def record_window(
+        self,
+        *,
+        stage_ms_avg: dict[str, float],
+        fps: float,
+        frame_idx: int,
+        cap_stats: dict[str, Any] | None,
+        reader_stats: dict[str, Any] | None,
+    ) -> None:
+        with self._lock:
+            self._last_window = {
+                "window_ts": time.time(),
+                "window_frames": 50,
+                "fps": round(float(fps), 3),
+                "frame_idx": int(frame_idx),
+                "stage_ms_avg": {k: round(float(v), 3) for k, v in stage_ms_avg.items()},
+                "cap": deepcopy(cap_stats or {}),
+                "reader": deepcopy(reader_stats or {}),
+            }
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return deepcopy(self._last_window)
+
+
+PERF = PerfStats()

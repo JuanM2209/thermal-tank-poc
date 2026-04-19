@@ -50,6 +50,20 @@ class ThermalCapture:
         # Count decode/transport errors so the watchdog can decide to reopen
         self._consecutive_errors: int = 0
         self._reopens: int = 0
+        # Rolling reader-thread timings (ms). Every cap.read() + decode cycle
+        # adds to these; /api/stats exposes the last 50-sample average so we
+        # can see if V4L2 itself is what's throttling the pipeline.
+        self._reader_read_ms_sum: float = 0.0
+        self._reader_read_ms_max: float = 0.0
+        self._reader_decode_ms_sum: float = 0.0
+        self._reader_cycle_count: int = 0
+        self._reader_last_window: dict = {
+            "avg_read_ms": 0.0,
+            "max_read_ms": 0.0,
+            "avg_decode_ms": 0.0,
+            "samples": 0,
+            "ts": 0.0,
+        }
 
     def _open_device(self) -> None:
         cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
@@ -125,11 +139,13 @@ class ThermalCapture:
             if cap is None:
                 time.sleep(0.05)
                 continue
+            t_read_start = time.perf_counter()
             try:
                 ok, raw = cap.read()
             except Exception as e:
                 log.warning(f"cap.read raised {e!r}; will recover")
                 ok, raw = False, None
+            read_ms = (time.perf_counter() - t_read_start) * 1000.0
 
             if not ok or raw is None:
                 self._consecutive_errors += 1
@@ -146,6 +162,7 @@ class ThermalCapture:
                     time.sleep(0.02)
                 continue
 
+            t_decode_start = time.perf_counter()
             try:
                 if self.decoder == "dual_yuyv":
                     visual, thermal = self._split_dual_yuyv(raw)
@@ -155,6 +172,7 @@ class ThermalCapture:
                 log.warning(f"decode failed: {e!r}")
                 self._consecutive_errors += 1
                 continue
+            decode_ms = (time.perf_counter() - t_decode_start) * 1000.0
 
             self._consecutive_errors = 0
             now = time.time()
@@ -162,6 +180,24 @@ class ThermalCapture:
                 self._latest = (visual, thermal)
                 self._latest_seq += 1
                 self._last_frame_ts = now
+                self._reader_read_ms_sum += read_ms
+                self._reader_decode_ms_sum += decode_ms
+                if read_ms > self._reader_read_ms_max:
+                    self._reader_read_ms_max = read_ms
+                self._reader_cycle_count += 1
+                if self._reader_cycle_count >= 50:
+                    n = self._reader_cycle_count
+                    self._reader_last_window = {
+                        "avg_read_ms": round(self._reader_read_ms_sum / n, 3),
+                        "max_read_ms": round(self._reader_read_ms_max, 3),
+                        "avg_decode_ms": round(self._reader_decode_ms_sum / n, 3),
+                        "samples": n,
+                        "ts": now,
+                    }
+                    self._reader_read_ms_sum = 0.0
+                    self._reader_decode_ms_sum = 0.0
+                    self._reader_read_ms_max = 0.0
+                    self._reader_cycle_count = 0
 
     def _reopen_safe(self) -> None:
         try:
@@ -210,6 +246,11 @@ class ThermalCapture:
             "reopens": self._reopens,
             "consecutive_errors": self._consecutive_errors,
         }
+
+    def reader_stats(self) -> dict:
+        """Last completed 50-sample window of V4L2 read + decode timings (ms)."""
+        with self._lock:
+            return dict(self._reader_last_window)
 
     def close(self):
         self._stop.set()

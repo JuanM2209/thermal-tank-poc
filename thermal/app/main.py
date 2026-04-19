@@ -35,7 +35,7 @@ from palette import (
 )
 from publisher import HttpPublisher
 from recorder import Recorder
-from state import SHARED
+from state import PERF, SHARED
 from stream import WebServer
 
 logging.basicConfig(
@@ -329,13 +329,22 @@ def main():
                 os.utime("/tmp/alive", None)
                 avg = {k: v / 50.0 for k, v in stage_ms.items()}
                 cap_stats = cap.stats()
+                reader_stats = cap.reader_stats()
                 log.info(
                     f"frame#{frame_count} fps={fps_now:.1f} tanks={len(results)} "
                     f"tmin={tmin:.1f} tmax={tmax:.1f} "
                     f"stage_ms(avg)=wait:{avg['wait']:.1f} analyze:{avg['analyze']:.1f} "
                     f"render:{avg['render']:.1f} overlay:{avg['overlay']:.1f} "
                     f"publish:{avg['publish']:.1f} share:{avg['share']:.1f} "
+                    f"reader(read:{reader_stats.get('avg_read_ms', 0):.1f} max:{reader_stats.get('max_read_ms', 0):.1f} decode:{reader_stats.get('avg_decode_ms', 0):.1f}) "
                     f"cap(seq={cap_stats['seq']} stale={cap_stats['last_frame_age_s']}s reopens={cap_stats['reopens']})"
+                )
+                PERF.record_window(
+                    stage_ms_avg=avg,
+                    fps=fps_now,
+                    frame_idx=frame_count,
+                    cap_stats=cap_stats,
+                    reader_stats=reader_stats,
                 )
                 for k in stage_ms:
                     stage_ms[k] = 0.0
