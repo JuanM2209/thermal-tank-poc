@@ -42,9 +42,36 @@ from webui import INDEX_HTML
 
 log = logging.getLogger("stream")
 
+# Silence werkzeug's per-request INFO logs. On ARMv7 + Flask-threaded, logging
+# every request blocks a worker on stdout I/O; during heavy polling this can
+# double-figure CPU cost. We keep errors/warnings.
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
 DEFAULT_IFRAME_ORIGINS = "https://*.datadesng.com"
 CALIBRATION_FRAME_COUNT = 30
 CALIBRATION_MAX_SECONDS = 12.0
+
+
+class _ShortCache:
+    """Tiny TTL cache for hot read-only endpoints, protects the Flask thread
+    pool when many tabs poll the same endpoint. `fn` must return a JSON-safe
+    dict."""
+
+    def __init__(self, ttl: float) -> None:
+        self._ttl = float(ttl)
+        self._exp = 0.0
+        self._val: dict | None = None
+        self._lock = threading.Lock()
+
+    def get(self, fn: Callable[[], dict]) -> dict:
+        now = time.monotonic()
+        with self._lock:
+            if self._val is not None and now < self._exp:
+                return self._val
+            v = fn()
+            self._val = v
+            self._exp = now + self._ttl
+            return v
 
 
 class WebServer:
@@ -60,6 +87,11 @@ class WebServer:
         self._on_change = on_config_change or (lambda: None)
         self._persist_path = persist_path
         self._recorder = recorder
+        # Short-TTL caches for hot polling endpoints. Multiple browser tabs +
+        # Node-RED dashboards otherwise flood Flask and starve the main loop.
+        self._state_cache = _ShortCache(ttl=0.3)
+        self._rec_status_cache = _ShortCache(ttl=1.0)
+        self._files_cache = _ShortCache(ttl=2.0)
         self.app = Flask("thermal")
         self.app.config["JSON_SORT_KEYS"] = False
         self._install_headers()
@@ -140,24 +172,26 @@ class WebServer:
 
         @app.route("/api/state")
         def api_state():
-            s = SHARED.snapshot()
-            h = w = 0
-            if s.rendered is not None:
-                h, w = s.rendered.shape[:2]
-            return jsonify({
-                "ts": int(s.ts * 1000),   # milliseconds, single source of truth
-                "frame_idx": s.frame_idx,
-                "fps": round(s.fps, 2),
-                "w": w, "h": h,
-                "upscale": s.rendered_upscale,
-                "tmin": round(s.tmin, 2),
-                "tmax": round(s.tmax, 2),
-                "hot":  None if s.hot  is None else {"x": s.hot[0],  "y": s.hot[1],  "t": round(s.hot[2],  2)},
-                "cold": None if s.cold is None else {"x": s.cold[0], "y": s.cold[1], "t": round(s.cold[2], 2)},
-                "results": s.results,
-                "tanks": self.cfg().get("tanks", []),
-                "calibration": self.cfg().get("calibration"),
-            })
+            def build() -> dict:
+                s = SHARED.snapshot()
+                h = w = 0
+                if s.rendered is not None:
+                    h, w = s.rendered.shape[:2]
+                return {
+                    "ts": int(s.ts * 1000),   # milliseconds, single source of truth
+                    "frame_idx": s.frame_idx,
+                    "fps": round(s.fps, 2),
+                    "w": w, "h": h,
+                    "upscale": s.rendered_upscale,
+                    "tmin": round(s.tmin, 2),
+                    "tmax": round(s.tmax, 2),
+                    "hot":  None if s.hot  is None else {"x": s.hot[0],  "y": s.hot[1],  "t": round(s.hot[2],  2)},
+                    "cold": None if s.cold is None else {"x": s.cold[0], "y": s.cold[1], "t": round(s.cold[2], 2)},
+                    "results": s.results,
+                    "tanks": self.cfg().get("tanks", []),
+                    "calibration": self.cfg().get("calibration"),
+                }
+            return jsonify(self._state_cache.get(build))
 
         @app.route("/api/temp")
         def api_temp():
@@ -447,14 +481,15 @@ class WebServer:
         @app.route("/api/record/status")
         def api_record_status():
             if self._recorder is None:
+                # Disabled state is stable; no need to cache.
                 return jsonify({"recording": False, "err": "recorder-disabled"})
-            return jsonify(self._recorder.status())
+            return jsonify(self._rec_status_cache.get(self._recorder.status))
 
         @app.route("/api/files")
         def api_files():
             if self._recorder is None:
                 return jsonify({"snapshots": [], "recordings": []})
-            return jsonify(self._recorder.list_files())
+            return jsonify(self._files_cache.get(self._recorder.list_files))
 
         @app.route("/api/files/<kind>/<path:name>")
         def api_file_download(kind, name):
