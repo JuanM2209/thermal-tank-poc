@@ -1852,8 +1852,8 @@ function app(){
       if (a.kind === 'tank_removed')   return 'tank ' + id + ' removed';
       if (a.kind === 'calibrated')     return 'calibrated (medium=' + (a.medium||'?') + ', locked=' + (a.locked?'yes':'no') + ')';
       if (a.kind === 'auto_detect')    return 'auto-detect: ' + (a.count||0) + ' candidates';
-      if (a.kind === 'alarm_hi')       return id + ': HI alarm tripped at ' + Number(a.level_pct||0).toFixed(1) + '% (threshold ' + Number(a.threshold||0).toFixed(0) + '%)';
-      if (a.kind === 'alarm_lo')       return id + ': LO alarm tripped at ' + Number(a.level_pct||0).toFixed(1) + '% (threshold ' + Number(a.threshold||0).toFixed(0) + '%)';
+      if (a.kind === 'alarm_hi')       return id + ': HI alarm tripped at ' + Number(a.level_pct||0).toFixed(1) + '% (threshold ' + Number(a.threshold_pct||0).toFixed(0) + '%)';
+      if (a.kind === 'alarm_lo')       return id + ': LO alarm tripped at ' + Number(a.level_pct||0).toFixed(1) + '% (threshold ' + Number(a.threshold_pct||0).toFixed(0) + '%)';
       if (a.kind === 'alarm_clear')    return id + ': alarm cleared (' + (a.scope||'') + ') at ' + Number(a.level_pct||0).toFixed(1) + '%';
       return a.kind || 'event';
     },
