@@ -27,6 +27,10 @@ class Latest:
     cold: tuple | None = None
     results: list = field(default_factory=list)
     fps: float = 0.0
+    # Non-critical diagnostic signals surfaced to the UI. rotate_hint is a
+    # gentle nudge ("thermal gradient is stronger horizontally — try rotating
+    # 90°") that the web UI can surface as a banner.
+    rotate_hint: dict | None = None
 
 
 class SharedState:
@@ -39,7 +43,7 @@ class SharedState:
 
     # ---- writer side ---------------------------------------------------------
     def publish(self, *, thermal, visual, rendered, rendered_upscale, tmin, tmax,
-                hot, cold, results, fps, frame_idx):
+                hot, cold, results, fps, frame_idx, rotate_hint=None):
         with self._lock:
             self._latest = Latest(
                 ts=time.time(),
@@ -52,6 +56,7 @@ class SharedState:
                 hot=hot, cold=cold,
                 results=results,
                 fps=fps,
+                rotate_hint=rotate_hint,
             )
 
     def append_event(self, kind: str, **payload):

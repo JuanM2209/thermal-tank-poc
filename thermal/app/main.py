@@ -20,6 +20,7 @@ import sys
 import time
 from collections import deque
 
+import numpy as np
 import yaml
 
 from analyzer import TankAnalyzer
@@ -37,6 +38,39 @@ from publisher import HttpPublisher
 from recorder import Recorder
 from state import PERF, SHARED
 from stream import WebServer
+
+
+def _compute_rotate_hint(thermal: np.ndarray, current_rotate: int) -> dict | None:
+    """Suggest rotating the camera when the dominant thermal gradient axis
+    does not match the UI's expectation (tanks are taller than wide, so the
+    gradient should be stronger vertically).
+
+    Returns None when the picture is ambiguous or the hint would be the
+    current setting. Cheap enough to run once per second on the raw frame.
+    """
+    if thermal is None or thermal.size < 64:
+        return None
+    # Downsample to ~64px on the short side to keep the cost trivial.
+    h, w = thermal.shape[:2]
+    step = max(1, min(h, w) // 64)
+    small = thermal[::step, ::step].astype(np.float32)
+    if small.shape[0] < 4 or small.shape[1] < 4:
+        return None
+    gy = np.abs(np.diff(small, axis=0)).mean()
+    gx = np.abs(np.diff(small, axis=1)).mean()
+    if gy + gx < 1e-4:
+        return None
+    ratio = gx / max(gy, 1e-4)
+    # Only suggest when horizontal gradient is clearly dominant (tanks
+    # imaged sideways). 1.6:1 is a firm enough margin to avoid bouncing.
+    if ratio < 1.6:
+        return None
+    suggested = (int(current_rotate) + 90) % 360
+    return {
+        "suggested": suggested,
+        "current": int(current_rotate),
+        "ratio_horizontal_to_vertical": round(float(ratio), 2),
+    }
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -90,11 +124,18 @@ def open_camera(cam_cfg: dict) -> ThermalCapture:
 
 
 class EventDetector:
-    """Emit level_change / low_confidence events without spamming."""
+    """Emit level_change / low_confidence / alarm_hi / alarm_lo events without spamming.
+
+    A tank can define ``alarms.hi_pct`` / ``alarms.lo_pct`` thresholds. We emit
+    an ``alarm_hi`` or ``alarm_lo`` event only on the *transition* into the
+    alarmed state, and an ``alarm_clear`` event when the tank returns below
+    HI / above LO, so the operator's alerts panel stays tidy.
+    """
     def __init__(self, min_level_delta: float = 5.0):
         self.min_level_delta = min_level_delta
         self._last_level: dict[str, float] = {}
         self._last_conf:  dict[str, str] = {}
+        self._last_alarm: dict[str, tuple[bool, bool]] = {}   # id -> (hi, lo)
 
     def scan(self, results):
         for r in results:
@@ -109,6 +150,44 @@ class EventDetector:
                     SHARED.append_event("low_confidence", id=r["id"],
                                         gradient_peak=r["gradient_peak"])
                 self._last_conf[r["id"]] = r["confidence"]
+
+            # ---- alarm edge detection ----
+            alarms = r.get("alarms") or {}
+            cur = (bool(alarms.get("hi")), bool(alarms.get("lo")))
+            prev_alarm = self._last_alarm.get(r["id"], (False, False))
+            if cur != prev_alarm:
+                # Fire an event on rising edge into HI / LO, and a clear
+                # event on falling edge. Separate kinds so the UI can pick
+                # severity colors without parsing payloads.
+                if cur[0] and not prev_alarm[0]:
+                    SHARED.append_event(
+                        "alarm_hi",
+                        id=r["id"],
+                        level_pct=r["level_pct"],
+                        threshold_pct=alarms.get("hi_pct"),
+                    )
+                if cur[1] and not prev_alarm[1]:
+                    SHARED.append_event(
+                        "alarm_lo",
+                        id=r["id"],
+                        level_pct=r["level_pct"],
+                        threshold_pct=alarms.get("lo_pct"),
+                    )
+                if prev_alarm[0] and not cur[0]:
+                    SHARED.append_event(
+                        "alarm_clear",
+                        id=r["id"],
+                        scope="hi",
+                        level_pct=r["level_pct"],
+                    )
+                if prev_alarm[1] and not cur[1]:
+                    SHARED.append_event(
+                        "alarm_clear",
+                        id=r["id"],
+                        scope="lo",
+                        level_pct=r["level_pct"],
+                    )
+                self._last_alarm[r["id"]] = cur
 
 
 def main():
@@ -190,6 +269,8 @@ def main():
 
     frozen_thermal = None
     frozen_visual = None
+    rotate_hint_cache: dict | None = None
+    rotate_hint_next = 0.0
 
     while running["v"]:
         try:
@@ -320,6 +401,12 @@ def main():
             event_det.scan(results)
             stage_ms["publish"] += (time.perf_counter() - t0) * 1000.0
 
+            # ---- rotate hint (cheap, once per second) ----
+            now_mono = time.monotonic()
+            if now_mono >= rotate_hint_next:
+                rotate_hint_cache = _compute_rotate_hint(thermal, rot)
+                rotate_hint_next = now_mono + 1.0
+
             # ---- share with web layer ----
             t0 = time.perf_counter()
             SHARED.publish(
@@ -328,6 +415,7 @@ def main():
                 tmin=tmin, tmax=tmax,
                 hot=hot, cold=cold,
                 results=results, fps=fps_now, frame_idx=frame_count,
+                rotate_hint=rotate_hint_cache,
             )
 
             # ---- video recording ----

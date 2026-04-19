@@ -144,6 +144,58 @@ INDEX_HTML = r"""<!doctype html>
     .tool-bar button.add{background:#065f46;color:#d1fae5;width:auto;padding:0 .55rem;font-size:.7rem;letter-spacing:.04em}
     .tool-bar button.add:hover{background:#047857;color:#fff}
     .tool-bar button.add.active{background:#10b981;color:#fff}
+
+    /* v1.7 — Tank Inspector overlay on live feed */
+    .inspector-overlay{position:absolute;inset:0;pointer-events:none;z-index:15}
+    .inspector-box{position:absolute;border:2px solid #38bdf8;box-shadow:0 0 0 9999px rgba(5,7,10,.55);border-radius:2px;transition:all .18s ease}
+    .inspector-box.alert{border-color:#f87171;box-shadow:0 0 0 9999px rgba(40,5,5,.6),0 0 20px rgba(248,113,113,.5)}
+    .inspector-line{position:absolute;height:0;border-top:2px dashed #fbbf24;left:0;right:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .inspector-line .tag{background:#fbbf24;color:#000;font-size:.62rem;font-weight:800;padding:3px 8px;border-radius:3px;letter-spacing:.08em;transform:translateY(-50%);font-family:ui-monospace,SFMono-Regular,monospace}
+    .inspector-line.secondary{border-top-color:#a855f7}
+    .inspector-line.secondary .tag{background:#a855f7;color:#fff}
+    .inspector-alarm-line{position:absolute;height:0;border-top:1px dashed #ef4444;left:0;right:0;opacity:.75}
+    .inspector-alarm-line.lo{border-top-color:#f59e0b}
+    .inspector-alarm-line .tag{position:absolute;right:2px;top:-8px;background:rgba(15,23,42,.85);color:#ef4444;font-size:.55rem;padding:1px 4px;border-radius:2px;letter-spacing:.1em;font-family:ui-monospace,SFMono-Regular,monospace}
+    .inspector-alarm-line.lo .tag{color:#f59e0b}
+    .inspector-close{position:absolute;pointer-events:auto;background:rgba(5,7,10,.85);border:1px solid #334155;color:#cbd5e1;font-size:.65rem;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;letter-spacing:.1em}
+    .inspector-close:hover{background:#1e293b;color:#fff}
+
+    /* Camera orientation banner (auto-rotate hint) */
+    .hint-banner{background:linear-gradient(90deg,#0c4a6e,#1e3a8a);border:1px solid #0369a1;border-radius:10px;padding:.5rem .75rem;display:flex;align-items:center;gap:.5rem}
+
+    /* Sparkline on tank card */
+    .spark-row{margin-top:8px;padding-top:8px;border-top:1px solid #1f2a38;display:flex;align-items:center;gap:8px}
+    .spark-row svg{flex:1;height:26px;width:100%}
+    .spark-row .lbl{font-size:.55rem;letter-spacing:.14em;text-transform:uppercase;color:#64748b;font-weight:700;min-width:42px}
+
+    /* Alarm pills on tank card */
+    .alarm-pills{display:flex;gap:4px;flex-wrap:wrap}
+    .alarm-pill{font-size:.55rem;letter-spacing:.14em;text-transform:uppercase;font-weight:800;padding:2px 6px;border-radius:3px;font-family:ui-monospace,SFMono-Regular,monospace}
+    .alarm-pill.hi{background:rgba(220,38,38,.18);color:#fca5a5;border:1px solid #991b1b}
+    .alarm-pill.lo{background:rgba(234,179,8,.18);color:#fde68a;border:1px solid #854d0e}
+
+    /* Tank card inspect / why buttons */
+    .tank-actions .btn.sm.inspect{background:#0c4a6e;border-color:#0369a1;color:#bae6fd}
+    .tank-actions .btn.sm.inspect:hover{background:#075985}
+    .tank-actions .btn.sm.inspect.active{background:#0284c7;color:#fff;border-color:#38bdf8}
+    .tank-actions .btn.sm.why{background:#3b0764;border-color:#6b21a8;color:#e9d5ff}
+    .tank-actions .btn.sm.why:hover{background:#581c87}
+
+    /* "Why this reading?" modal — gradient trace */
+    .why-panel{background:#0b1017;border:1px solid #1f2a38;border-radius:10px;padding:14px 16px}
+    .why-panel .hd{font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:4px}
+    .why-panel .val{font-size:1rem;font-weight:700;color:#e2e8f0;font-variant-numeric:tabular-nums}
+    .why-trace{background:#05080c;border:1px solid #1f2a38;border-radius:8px;padding:8px}
+    .why-bar{height:8px;border-radius:999px;background:#0f172a;overflow:hidden;margin-top:3px}
+    .why-bar .fill{height:100%;background:linear-gradient(90deg,#22d3ee,#6366f1,#a855f7)}
+    .why-bar .fill.warn{background:linear-gradient(90deg,#f59e0b,#dc2626)}
+
+    /* Camera orientation section in Settings */
+    .cam-orient-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+    .cam-orient-grid button{padding:.4rem .25rem;border-radius:6px;font-size:.7rem;background:#12161c;border:1px solid #2a323d;color:#cbd5e1;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:600}
+    .cam-orient-grid button:hover{background:#1a2030;color:#fff}
+    .cam-orient-grid button.active{background:#1d4ed8;border-color:#2563eb;color:#fff}
+    .cam-orient-grid button .ic{font-size:1.2rem;font-weight:700;line-height:1}
   </style>
 </head>
 <body class="h-full grid-bg">
@@ -180,6 +232,20 @@ INDEX_HTML = r"""<!doctype html>
     <span>i</span>
     <span x-text="banner"></span>
     <button class="btn ml-auto" @click="banner=null">dismiss</button>
+  </div>
+</div>
+
+<!-- Auto-rotate hint banner -->
+<div class="px-4 pt-2" x-show="rotateHintVisible()" x-transition>
+  <div class="hint-banner text-xs">
+    <span class="text-base">&#8634;</span>
+    <span>
+      Thermal gradient looks stronger horizontally
+      (<b x-text="(state.rotate_hint?.ratio_horizontal_to_vertical||0).toFixed(2)"></b>&times;).
+      The camera may need to be rotated <b x-text="state.rotate_hint?.suggested + '&deg;'"></b>.
+    </span>
+    <button class="btn ml-auto" @click="applyRotateHint()">Apply <span x-text="state.rotate_hint?.suggested+'&deg;'"></span></button>
+    <button class="btn" @click="dismissRotateHint()">dismiss</button>
   </div>
 </div>
 
@@ -264,6 +330,40 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </template>
       </div>
+
+      <!-- Tank Inspector overlay (v1.7) — click any tank card's "Inspect"
+           button to highlight its perimeter on the live feed with a dashed
+           level line and a floating "% · FT · BBL" label, plus optional
+           HI/LO alarm guide lines. -->
+      <div class="inspector-overlay" x-show="inspector.tankId" x-transition>
+        <template x-if="inspectedTank()">
+          <div>
+            <div class="inspector-box" :class="inspectorBoxCls()" :style="inspectorBoxStyle()"></div>
+            <!-- primary level line -->
+            <div class="inspector-line" :style="inspectorLineStyle('primary')">
+              <span class="tag" x-text="inspectorPrimaryLabel()"></span>
+            </div>
+            <!-- secondary layer (sludge) when multi_layer on -->
+            <template x-if="inspectorHasSecondary()">
+              <div class="inspector-line secondary" :style="inspectorLineStyle('secondary')">
+                <span class="tag" x-text="inspectorSecondaryLabel()"></span>
+              </div>
+            </template>
+            <!-- HI / LO alarm guides -->
+            <template x-if="inspectorAlarmPct('hi') != null">
+              <div class="inspector-alarm-line" :style="inspectorAlarmLineStyle('hi')">
+                <span class="tag" x-text="'HI ' + inspectorAlarmPct('hi').toFixed(0) + '%'"></span>
+              </div>
+            </template>
+            <template x-if="inspectorAlarmPct('lo') != null">
+              <div class="inspector-alarm-line lo" :style="inspectorAlarmLineStyle('lo')">
+                <span class="tag" x-text="'LO ' + inspectorAlarmPct('lo').toFixed(0) + '%'"></span>
+              </div>
+            </template>
+            <button class="inspector-close" :style="inspectorCloseStyle()" @click="closeInspector()">CLOSE</button>
+          </div>
+        </template>
+      </div>
     </div>
   </section>
 
@@ -274,6 +374,10 @@ INDEX_HTML = r"""<!doctype html>
         <div class="tank-head">
           <div class="tank-id"><b x-text="t.id.toUpperCase().replace('_','-')"></b></div>
           <div class="flex items-center gap-2">
+            <div class="alarm-pills">
+              <span class="alarm-pill hi" x-show="t.alarms?.hi" title="HI alarm tripped">HI</span>
+              <span class="alarm-pill lo" x-show="t.alarms?.lo" title="LO alarm tripped">LO</span>
+            </div>
             <div class="tank-status" :class="tankStatus(t).klass" x-text="tankStatus(t).label"></div>
           </div>
         </div>
@@ -319,18 +423,40 @@ INDEX_HTML = r"""<!doctype html>
           <div class="c max"><div class="l">Max</div><div class="v" x-text="fmt(t.temp_max,1)+'&deg;C'"></div></div>
         </div>
 
+        <!-- Sparkline: last ~30 minutes of level_pct sampled client-side. -->
+        <div class="spark-row" x-show="sparkLine(t.id).length >= 2">
+          <span class="lbl">30 min</span>
+          <svg viewBox="0 0 100 26" preserveAspectRatio="none">
+            <polyline fill="none" stroke-width="1.4" :stroke="sparkStroke(t)"
+                      :points="sparkPoints(t.id)"></polyline>
+          </svg>
+        </div>
+
         <details class="mt-2 text-[11px] text-slate-400">
           <summary class="hover:text-slate-200">geometry &amp; roi</summary>
           <div class="k mt-1 leading-5" x-show="t.geometry">
             <div>height <span x-text="t.geometry?.height_ft"></span> ft &middot; D <span x-text="t.geometry?.diameter_ft"></span> ft &middot; <span x-text="t.geometry?.shape"></span></div>
             <div x-show="t.reading">full <span x-text="fmt(t.reading?.volume_full_bbl,0)"></span> bbl &middot; ullage <span x-text="fmt(t.reading?.ullage_ft,1)"></span> ft</div>
+            <div x-show="t.alarms?.hi_pct != null || t.alarms?.lo_pct != null">
+              alarms: HI <span x-text="t.alarms?.hi_pct != null ? t.alarms.hi_pct.toFixed(0)+'%' : '—'"></span>
+              &middot; LO <span x-text="t.alarms?.lo_pct != null ? t.alarms.lo_pct.toFixed(0)+'%' : '—'"></span>
+            </div>
           </div>
           <div class="k mt-1" x-text="'roi x=' + t.roi?.x + ' y=' + t.roi?.y + ' w=' + t.roi?.w + ' h=' + t.roi?.h"></div>
-          <div class="tank-actions">
-            <button class="btn sm" @click="editTank(t)">Edit</button>
-            <button class="btn sm" @click="removeTank(t.id)">Remove</button>
-          </div>
         </details>
+
+        <div class="tank-actions">
+          <button class="btn sm inspect"
+                  :class="inspector.tankId===t.id?'active':''"
+                  @click="toggleInspector(t.id)"
+                  title="Highlight perimeter + level line on live feed">
+            <span x-show="inspector.tankId!==t.id">Inspect</span>
+            <span x-show="inspector.tankId===t.id">Hide</span>
+          </button>
+          <button class="btn sm why" @click="openWhy(t.id)" title="Why is the detector reporting this level?">Why?</button>
+          <button class="btn sm" @click="editTank(t)">Edit</button>
+          <button class="btn sm" @click="removeTank(t.id)">Remove</button>
+        </div>
       </div>
     </template>
     <template x-if="!state.results?.length">
@@ -379,7 +505,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.6</span>
+    <span>Operator Console v1.7</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -510,6 +636,35 @@ INDEX_HTML = r"""<!doctype html>
       Per-tank scale (0-100% = 0-X ft/in) is set in the Edit dialog.</p>
     </section>
 
+    <!-- Camera orientation (rotate + flip) — applied live, no restart -->
+    <section>
+      <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Camera orientation</div>
+      <div class="cam-orient-grid mb-2">
+        <template x-for="r in [0,90,180,270]" :key="r">
+          <button :class="(config?.stream?.rotate||0)===r?'active':''"
+                  @click="patch({stream:{rotate:r}})"
+                  :title="'Rotate '+r+'&deg;'">
+            <span class="ic" x-text="r===0?'&#8593;':(r===90?'&#8594;':(r===180?'&#8595;':'&#8592;'))"></span>
+            <span x-text="r + '&deg;'"></span>
+          </button>
+        </template>
+      </div>
+      <div class="flex gap-3 items-center">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" :checked="!!config?.stream?.flip_h"
+                 @change="patch({stream:{flip_h: $event.target.checked}})">
+          <span>Flip horizontal</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" :checked="!!config?.stream?.flip_v"
+                 @change="patch({stream:{flip_v: $event.target.checked}})">
+          <span>Flip vertical</span>
+        </label>
+      </div>
+      <p class="text-[10px] text-slate-500 mt-2">Applied live (no restart). If the auto-hint says
+        the scene looks horizontal, rotate 90&deg; so the liquid/air interface is vertical.</p>
+    </section>
+
     <!-- Level unit (moved here from top bar) -->
     <section>
       <div class="text-slate-400 uppercase tracking-wider text-[10px] mb-2">Level display unit</div>
@@ -571,7 +726,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.6 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.7 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -616,6 +771,38 @@ INDEX_HTML = r"""<!doctype html>
         <input type="number" step="0.1" class="bg-black/40 border border-[#1f2630] rounded px-2 py-1" x-model.number="editor.tank.min_temp_delta">
       </label>
 
+      <!-- Alarm thresholds -->
+      <div class="col-span-2 pt-2 border-t border-[#1f2630]">
+        <div class="text-slate-400 text-xs mb-2 uppercase tracking-wider">Alarm thresholds (%)</div>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="flex flex-col gap-1">
+            <span class="text-slate-500 text-[10px]">HI alarm (%) — trip when level &ge;</span>
+            <input type="number" min="0" max="100" step="1" placeholder="e.g. 90"
+                   class="bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+                   :value="editor.tank.alarms?.hi_pct ?? ''"
+                   @change="editor.tank.alarms = Object.assign({}, editor.tank.alarms, {hi_pct: $event.target.value === '' ? null : Number($event.target.value)})">
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="text-slate-500 text-[10px]">LO alarm (%) — trip when level &le;</span>
+            <input type="number" min="0" max="100" step="1" placeholder="e.g. 10"
+                   class="bg-black/40 border border-[#1f2630] rounded px-2 py-1"
+                   :value="editor.tank.alarms?.lo_pct ?? ''"
+                   @change="editor.tank.alarms = Object.assign({}, editor.tank.alarms, {lo_pct: $event.target.value === '' ? null : Number($event.target.value)})">
+          </label>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-1">Blank = disabled. Crossing events fire in the Alerts panel and on the Inspector overlay.</p>
+      </div>
+
+      <!-- Multi-layer detection toggle -->
+      <div class="col-span-2">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" :checked="!!editor.tank.multi_layer"
+                 @change="editor.tank.multi_layer = $event.target.checked">
+          <span class="text-slate-300">Multi-layer detection (air · product · water · sludge)</span>
+        </label>
+        <p class="text-[10px] text-slate-500 mt-1 ml-6">Looks for a secondary gradient peak (e.g. oil/water interface). Adds a purple line in the Inspector.</p>
+      </div>
+
       <!-- Perimeter / ROI -->
       <div class="col-span-2 pt-2 border-t border-[#1f2630]">
         <div class="text-slate-400 text-xs mb-2 uppercase tracking-wider">Perimeter (pixel ROI)</div>
@@ -643,6 +830,113 @@ INDEX_HTML = r"""<!doctype html>
   </div>
 </div>
 
+<!-- "Why this reading?" modal — explains the current level for one tank -->
+<div x-show="why.show" x-transition class="fixed inset-0 z-50 modal-bg flex items-center justify-center p-6" @click.self="why.show=false">
+  <div class="card w-full max-w-3xl p-5 max-h-[85vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h2 class="text-lg font-semibold">Why this reading?</h2>
+        <p class="text-xs text-slate-400" x-show="why.live">
+          <span x-text="why.live?.id?.toUpperCase().replace('_','-')"></span>
+          &middot;
+          <span x-text="(why.live?.level_pct||0).toFixed(1) + '%'"></span>
+          &middot;
+          <span x-text="'gate ' + (why.detail?.min_temp_delta||0).toFixed(1) + '&deg;C'"></span>
+        </p>
+      </div>
+      <button class="btn" @click="why.show=false">Close</button>
+    </div>
+
+    <template x-if="why.loading">
+      <div class="text-slate-400 text-sm py-8 text-center">Fetching gradient profile...</div>
+    </template>
+
+    <template x-if="!why.loading && why.detail">
+      <div class="space-y-4">
+        <!-- Key numbers -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="why-panel">
+            <div class="hd">Peak gradient</div>
+            <div class="val" x-text="(why.detail?.peak_val||0).toFixed(2) + ' &deg;C/row'"></div>
+            <div class="why-bar"><div class="fill" :style="'width:'+whyPeakPct()+'%'" :class="whyPeakPass()?'':'warn'"></div></div>
+            <div class="text-[10px] mt-1" :class="whyPeakPass()?'text-emerald-400':'text-amber-400'"
+                 x-text="whyPeakPass()?('PASSES gate '+(why.detail?.min_temp_delta||0).toFixed(2)+' &deg;C'):('BELOW gate '+(why.detail?.min_temp_delta||0).toFixed(2)+' &deg;C \u2014 low confidence')"></div>
+          </div>
+          <div class="why-panel">
+            <div class="hd">Interface row</div>
+            <div class="val" x-text="(why.detail?.peak_idx||0) + ' / ' + (why.detail?.roi_height||0)"></div>
+            <div class="text-[10px] text-slate-500 mt-1">row of max |dT/dy| inside ROI</div>
+          </div>
+          <div class="why-panel">
+            <div class="hd">Temp range</div>
+            <div class="val" x-text="why.live ? (why.live.temp_min?.toFixed(1) + ' \u2192 ' + why.live.temp_max?.toFixed(1) + ' &deg;C') : '\u2014'"></div>
+            <div class="text-[10px] text-slate-500 mt-1"
+                 x-text="why.live ? ('span ' + ((why.live.temp_max||0) - (why.live.temp_min||0)).toFixed(1) + ' &deg;C') : ''"></div>
+          </div>
+          <div class="why-panel">
+            <div class="hd">Confidence</div>
+            <div class="val" x-text="(why.live?.confidence||'-').toUpperCase()"></div>
+            <div class="text-[10px] text-slate-500 mt-1"
+                 x-text="why.live?.medium_declared ? ('declared ' + why.live.medium_declared) : ('classified ' + (why.live?.medium||'unknown'))"></div>
+          </div>
+        </div>
+
+        <!-- Gradient trace SVG -->
+        <div class="why-trace">
+          <div class="flex items-center justify-between mb-2 text-[11px] text-slate-400">
+            <span>Per-row gradient magnitude (top = ROI top, bottom = ROI bottom)</span>
+            <span class="k">peak row <b class="text-amber-400" x-text="why.detail?.peak_idx"></b></span>
+          </div>
+          <svg :viewBox="'0 0 200 ' + Math.max(80, (why.detail?.gradient?.length||1))"
+               preserveAspectRatio="none"
+               class="w-full" style="height:220px;background:#030608;border-radius:6px">
+            <!-- zero line -->
+            <line x1="0" x2="200" :y1="0" :y2="0" stroke="#1f2a38" stroke-width="1"/>
+            <!-- min_temp_delta gate line -->
+            <line x1="0" x2="200" :y1="0" :y2="(why.detail?.gradient?.length||1)"
+                  stroke="transparent" stroke-dasharray="3 3"/>
+            <!-- gradient polyline (horizontal = magnitude scaled to 0..200) -->
+            <polyline fill="none" stroke="#22d3ee" stroke-width="1.4"
+                      :points="whyGradPoints()"/>
+            <!-- peak marker -->
+            <line x1="0" x2="200" :y1="why.detail?.peak_idx"
+                  :y2="why.detail?.peak_idx"
+                  stroke="#fbbf24" stroke-width="1" stroke-dasharray="4 3"/>
+            <!-- gate threshold as vertical dashed bar -->
+            <line :x1="whyGateX()" :x2="whyGateX()"
+                  y1="0" :y2="(why.detail?.gradient?.length||1)"
+                  stroke="#ef4444" stroke-width="1" stroke-dasharray="3 2" opacity="0.6"/>
+          </svg>
+          <div class="flex justify-between text-[10px] text-slate-500 mt-1">
+            <span>&larr; stronger gradient at this row means sharper air/liquid boundary</span>
+            <span>gate <b class="text-red-400" x-text="why.detail?.min_temp_delta?.toFixed(2)"></b> &deg;C/row</span>
+          </div>
+        </div>
+
+        <!-- Plain-language explainer -->
+        <div class="why-panel text-[12px] leading-relaxed" x-show="why.live">
+          <div class="hd mb-2">Interpretation</div>
+          <p x-text="whyExplainer()"></p>
+        </div>
+
+        <!-- Layers (when multi-layer is on) -->
+        <template x-if="why.live?.layers?.length > 1">
+          <div class="why-panel">
+            <div class="hd mb-2">Detected layers</div>
+            <template x-for="layer in why.live.layers" :key="layer.label">
+              <div class="flex items-center gap-3 py-1 text-[12px]">
+                <span class="alarm-pill" :style="layer.label==='sludge' || layer.label==='upper' ? 'background:rgba(168,85,247,.2);color:#e9d5ff;border:1px solid #6b21a8' : 'background:rgba(251,191,36,.2);color:#fde68a;border:1px solid #854d0e'"
+                      x-text="layer.label"></span>
+                <span class="k" x-text="'level '+layer.level_pct.toFixed(1)+'% \u00b7 row '+layer.row+' \u00b7 grad '+layer.gradient.toFixed(2)"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -660,6 +954,16 @@ function app(){
     detect: { modal:false, show:false, running:false, framesUsed:0, candidates:[], unit:'ft' },
     editor: { show:false, tank:null, heightValue:0, heightUnit:'ft', isNew:false },
     alerts: { collapsed:false, items:[], since:0 },
+
+    // v1.7 — Tank Inspector overlay + sparkline + Why modal + rotate hint
+    inspector: { tankId: null },
+    sparkBuffers: {},              // { [tankId]: number[] }  rolling ~60 samples
+    sparkCap: 60,                   // ~30 min at 30s per sample — tick() pushes every call
+    sparkTickEvery: 3,              // push sample every Nth tick (~4.5s) to stretch to ~30 min
+    _sparkTickCounter: 0,
+    why: { show:false, loading:false, tankId:null, detail:null, live:null },
+    rotateHintDismissedFor: null,  // rotate value the user dismissed for; re-show if rotate changes
+
 
     // Settings drawer: which overlay toggles to show
     overlayKeys: [
@@ -722,6 +1026,17 @@ function app(){
         this.state = s; this.live = true;
         const cal = this.config?.calibration;
         if (cal?.notes?.length && !this.banner) this.banner = cal.notes[0];
+        // Sparkline: append every Nth tick so ~60 samples span ~30 min.
+        this._sparkTickCounter = (this._sparkTickCounter + 1) % this.sparkTickEvery;
+        if (this._sparkTickCounter === 0 && Array.isArray(s.results)) {
+          for (const t of s.results) {
+            if (t.level_pct == null) continue;
+            let buf = this.sparkBuffers[t.id];
+            if (!buf) { buf = []; this.sparkBuffers[t.id] = buf; }
+            buf.push(Number(t.level_pct));
+            if (buf.length > this.sparkCap) buf.splice(0, buf.length - this.sparkCap);
+          }
+        }
       } catch(e){ this.live = false; }
     },
     async pollRecording(){
@@ -1119,10 +1434,14 @@ function app(){
         roi:{x:0, y:0, w:40, h:170},
         topic:'',
         min_temp_delta: 1.0,
+        alarms: {hi_pct:null, lo_pct:null},
+        multi_layer: false,
       }, t)));
       staged.topic = staged.topic || '';
       staged.roi = Object.assign({x:0,y:0,w:40,h:170}, staged.roi || {});
       staged.geometry = Object.assign({height_ft:20,diameter_ft:10,shape:'vertical_cylinder'}, staged.geometry || {});
+      staged.alarms = Object.assign({hi_pct:null, lo_pct:null}, staged.alarms || {});
+      staged.multi_layer = !!staged.multi_layer;
       this.editor.tank = staged;
       this.editor.isNew = !((this.config?.tanks || []).some(x => x.id === staged.id));
       // Seed scale inputs from whatever unit the UI currently prefers.
@@ -1137,6 +1456,11 @@ function app(){
       const val = Number(this.editor.heightValue) || 0;
       const heightFt = this.editor.heightUnit === 'in' ? +(val / 12).toFixed(3) : val;
       t.geometry = Object.assign({}, t.geometry, { height_ft: heightFt });
+      // Normalise alarms: blank inputs are null, valid numbers pass through.
+      const alarms = t.alarms ? {
+        hi_pct: (t.alarms.hi_pct == null || t.alarms.hi_pct === '') ? null : Number(t.alarms.hi_pct),
+        lo_pct: (t.alarms.lo_pct == null || t.alarms.lo_pct === '') ? null : Number(t.alarms.lo_pct),
+      } : null;
       const body = {
         id: t.id,
         name: t.name,
@@ -1150,6 +1474,8 @@ function app(){
         },
         geometry: t.geometry,
         min_temp_delta: t.min_temp_delta,
+        alarms,
+        multi_layer: !!t.multi_layer,
       };
       try {
         if (this.editor.isNew) {
@@ -1237,6 +1563,219 @@ function app(){
       }
     },
 
+    // -------------------- v1.7: Inspector overlay --------------------
+    // Resolve the tank object currently targeted by the Inspector.
+    inspectedTank(){
+      const id = this.inspector.tankId;
+      if (!id) return null;
+      return (this.state.results || []).find(t => t.id === id) || null;
+    },
+    toggleInspector(id){
+      this.inspector.tankId = (this.inspector.tankId === id) ? null : id;
+    },
+    closeInspector(){ this.inspector.tankId = null; },
+    // Project sensor-space ROI/rows onto the rendered <img> tag — gives us
+    // the same scaling the measurement canvas uses. Returns null when the
+    // image isn't laid out yet (first frame).
+    _inspectorImgRect(){
+      const img = document.getElementById('mjpeg-img');
+      if (!img) return null;
+      const r = img.getBoundingClientRect();
+      const w = img.parentElement.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      const sw = this.state.sensor_w || this.state.w || 256;
+      const sh = this.state.sensor_h || this.state.h || 192;
+      return {
+        offX: r.left - w.left, offY: r.top - w.top,
+        w: r.width, h: r.height, sw, sh,
+        sx: r.width / sw, sy: r.height / sh,
+      };
+    },
+    inspectorBoxStyle(){
+      const t = this.inspectedTank();
+      const g = this._inspectorImgRect();
+      if (!t || !g || !t.roi) return 'display:none';
+      const x = g.offX + t.roi.x * g.sx;
+      const y = g.offY + t.roi.y * g.sy;
+      const w = t.roi.w * g.sx;
+      const h = t.roi.h * g.sy;
+      return `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
+    },
+    inspectorBoxCls(){
+      const t = this.inspectedTank();
+      if (!t) return '';
+      return (t.alarms?.hi || t.alarms?.lo) ? 'alert' : '';
+    },
+    inspectorLineStyle(layer){
+      const t = this.inspectedTank();
+      const g = this._inspectorImgRect();
+      if (!t || !g) return 'display:none';
+      let rowSensor = t.interface_row_sensor;
+      if (layer === 'secondary') {
+        const sec = (t.layers || []).find(l => l.label !== 'primary');
+        if (!sec) return 'display:none';
+        rowSensor = sec.row_sensor;
+      }
+      if (rowSensor == null) return 'display:none';
+      const y = g.offY + rowSensor * g.sy;
+      const left = g.offX + (t.roi?.x || 0) * g.sx;
+      const width = (t.roi?.w || 0) * g.sx;
+      return `left:${left}px;top:${y}px;width:${width}px`;
+    },
+    inspectorPrimaryLabel(){
+      const t = this.inspectedTank();
+      if (!t) return '';
+      const pct = (t.level_pct != null ? t.level_pct.toFixed(1) : '--') + '%';
+      const ft = t.reading?.level_ft != null ? (' \u00b7 ' + t.reading.level_ft.toFixed(2) + ' ft') : '';
+      const bbl = t.reading?.volume_bbl != null ? (' \u00b7 ' + Math.round(t.reading.volume_bbl) + ' BBL') : '';
+      return 'LEVEL ' + pct + ft + bbl;
+    },
+    inspectorHasSecondary(){
+      const t = this.inspectedTank();
+      return !!(t && Array.isArray(t.layers) && t.layers.length > 1);
+    },
+    inspectorSecondaryLabel(){
+      const t = this.inspectedTank();
+      if (!t) return '';
+      const sec = (t.layers || []).find(l => l.label !== 'primary');
+      if (!sec) return '';
+      return sec.label.toUpperCase() + ' ' + sec.level_pct.toFixed(1) + '%';
+    },
+    inspectorAlarmPct(kind){
+      const t = this.inspectedTank();
+      if (!t || !t.alarms) return null;
+      const v = (kind === 'hi') ? t.alarms.hi_pct : t.alarms.lo_pct;
+      if (v == null) return null;
+      return Number(v);
+    },
+    inspectorAlarmLineStyle(kind){
+      const t = this.inspectedTank();
+      const g = this._inspectorImgRect();
+      if (!t || !g || !t.roi) return 'display:none';
+      const pct = this.inspectorAlarmPct(kind);
+      if (pct == null) return 'display:none';
+      // level_pct is measured from ROI bottom → convert to sensor y.
+      const fromBottom = pct / 100;
+      const rowRel = t.roi.h - fromBottom * t.roi.h;
+      const rowSensor = t.roi.y + rowRel;
+      const y = g.offY + rowSensor * g.sy;
+      const left = g.offX + t.roi.x * g.sx;
+      const width = t.roi.w * g.sx;
+      return `left:${left}px;top:${y}px;width:${width}px`;
+    },
+    inspectorCloseStyle(){
+      const t = this.inspectedTank();
+      const g = this._inspectorImgRect();
+      if (!t || !g || !t.roi) return 'display:none';
+      const x = g.offX + (t.roi.x + t.roi.w) * g.sx - 55;
+      const y = g.offY + t.roi.y * g.sy - 24;
+      return `left:${x}px;top:${Math.max(4, y)}px`;
+    },
+
+    // -------------------- v1.7: Sparkline --------------------
+    sparkLine(id){ return this.sparkBuffers[id] || []; },
+    sparkPoints(id){
+      const buf = this.sparkLine(id);
+      if (!buf.length) return '';
+      const n = buf.length;
+      // normalise to 0..100 → SVG y = 26..0 (inverted), x = 0..100
+      return buf.map((v, i) => {
+        const x = n === 1 ? 50 : (i / (n - 1)) * 100;
+        const y = 26 - (Math.max(0, Math.min(100, v)) / 100) * 26;
+        return x.toFixed(2) + ',' + y.toFixed(2);
+      }).join(' ');
+    },
+    sparkStroke(t){
+      const m = t.medium || 'unknown';
+      if (t.alarms?.hi || t.alarms?.lo) return '#f87171';
+      if (m === 'water') return '#22d3ee';
+      if (m === 'oil') return '#fb923c';
+      return '#94a3b8';
+    },
+
+    // -------------------- v1.7: Rotate hint banner --------------------
+    rotateHintVisible(){
+      const h = this.state?.rotate_hint;
+      if (!h || h.suggested == null) return false;
+      // Hide if the user already dismissed this *exact* suggestion.
+      const cur = Number(this.config?.stream?.rotate || 0);
+      if (this.rotateHintDismissedFor === cur) return false;
+      return true;
+    },
+    async applyRotateHint(){
+      const h = this.state?.rotate_hint;
+      if (!h) return;
+      await this.patch({stream:{rotate: Number(h.suggested)}});
+      this.banner = 'Camera rotated to ' + h.suggested + '\u00b0';
+    },
+    dismissRotateHint(){
+      this.rotateHintDismissedFor = Number(this.config?.stream?.rotate || 0);
+    },
+
+    // -------------------- v1.7: Why this reading? modal --------------------
+    async openWhy(id){
+      this.why = { show:true, loading:true, tankId:id, detail:null, live:null };
+      try {
+        const r = await fetch('/api/tank/' + encodeURIComponent(id) + '/gradient');
+        if (!r.ok) {
+          this.banner = 'Why: ' + r.status + ' ' + r.statusText;
+          this.why.loading = false;
+          return;
+        }
+        const j = await r.json();
+        this.why.detail = j.detail;
+        this.why.live = j.live;
+      } catch(e){ this.banner = 'Why failed: ' + e; }
+      this.why.loading = false;
+    },
+    whyPeakPct(){
+      const d = this.why.detail;
+      if (!d) return 0;
+      const gate = Math.max(0.01, d.min_temp_delta || 1);
+      return Math.min(100, (d.peak_val / (gate * 2)) * 100);
+    },
+    whyPeakPass(){
+      const d = this.why.detail;
+      if (!d) return false;
+      return (d.peak_val || 0) >= (d.min_temp_delta || 0);
+    },
+    whyGradPoints(){
+      const d = this.why.detail;
+      if (!d || !d.gradient?.length) return '';
+      const n = d.gradient.length;
+      const mx = Math.max(0.01, ...d.gradient);
+      // x = magnitude (0..200), y = row index (0..n)
+      return d.gradient.map((v, i) => ((v / mx) * 200).toFixed(2) + ',' + i).join(' ');
+    },
+    whyGateX(){
+      const d = this.why.detail;
+      if (!d || !d.gradient?.length) return 0;
+      const mx = Math.max(0.01, ...d.gradient);
+      return ((d.min_temp_delta || 0) / mx) * 200;
+    },
+    whyExplainer(){
+      const d = this.why.detail;
+      const lv = this.why.live;
+      if (!d || !lv) return '';
+      const pass = this.whyPeakPass();
+      const pct = (lv.level_pct||0).toFixed(1);
+      const row = d.peak_idx;
+      const total = d.roi_height;
+      const peak = (d.peak_val||0).toFixed(2);
+      const gate = (d.min_temp_delta||0).toFixed(2);
+      let s = 'Inside the ROI (' + total + ' rows tall) the sharpest vertical temperature change is at row ' + row +
+              ' — a gradient magnitude of ' + peak + ' \u00b0C/row. ';
+      if (pass) {
+        s += 'That is above the confidence gate (' + gate + ' \u00b0C/row), so the detector trusts this as the liquid/air interface. ';
+        s += 'The level is reported as ' + pct + '% of the tank height (ROI bottom \u2192 top).';
+      } else {
+        s += 'That is BELOW the gate (' + gate + ' \u00b0C/row), so the detector flags the reading as LOW CONFIDENCE. ';
+        s += 'Common causes: the tank is thermally uniform (empty or full), the ROI is too narrow, or ambient is drifting. ';
+        s += 'Lower the min_temp_delta in Edit to accept weaker gradients.';
+      }
+      return s;
+    },
+
     // -------------------- Alerts / Events --------------------
     async fetchAlerts(){
       try {
@@ -1290,6 +1829,8 @@ function app(){
         return 'warn';
       }
       if (a.kind === 'tank_removed') return 'warn';
+      if (a.kind === 'alarm_hi' || a.kind === 'alarm_lo') return 'al';
+      if (a.kind === 'alarm_clear') return 'warn';
       return '';
     },
     fmtAlertTime(ts){
@@ -1311,6 +1852,9 @@ function app(){
       if (a.kind === 'tank_removed')   return 'tank ' + id + ' removed';
       if (a.kind === 'calibrated')     return 'calibrated (medium=' + (a.medium||'?') + ', locked=' + (a.locked?'yes':'no') + ')';
       if (a.kind === 'auto_detect')    return 'auto-detect: ' + (a.count||0) + ' candidates';
+      if (a.kind === 'alarm_hi')       return id + ': HI alarm tripped at ' + Number(a.level_pct||0).toFixed(1) + '% (threshold ' + Number(a.threshold||0).toFixed(0) + '%)';
+      if (a.kind === 'alarm_lo')       return id + ': LO alarm tripped at ' + Number(a.level_pct||0).toFixed(1) + '% (threshold ' + Number(a.threshold||0).toFixed(0) + '%)';
+      if (a.kind === 'alarm_clear')    return id + ': alarm cleared (' + (a.scope||'') + ') at ' + Number(a.level_pct||0).toFixed(1) + '%';
       return a.kind || 'event';
     },
   };

@@ -14,6 +14,11 @@ Output per tank (new in v1):
     level_pct, level_raw_pct, temp_min/max/avg, gradient_peak, confidence,
     medium, medium_confidence, geometry (dict), reading (dict), calibration
     (placeholder — filled in by Pipeline wrapping the analyzer).
+
+v1.7 additions:
+    interface_row_sensor (absolute Y px in sensor coords, for drawing the
+    level line on the UI canvas), alarms_state (hi/lo crossings), layers
+    (secondary gradient peaks when multi_layer is enabled per tank).
 """
 
 from __future__ import annotations
@@ -35,6 +40,14 @@ log = logging.getLogger("analyzer")
 # history — it has no meaningful frame-to-frame variation, so we only pay its
 # cost once per second and cache the result per tank.
 CLASSIFY_INTERVAL_S = 1.0
+
+# Minimum row separation between two gradient peaks when multi_layer mode is
+# on, expressed as a fraction of the ROI height. Prevents picking two rows
+# that describe the same physical interface.
+MULTI_LAYER_MIN_SEP_FRAC = 0.08
+# Keep peaks at least this fraction of the top peak's magnitude. Rejects
+# dishwater secondary peaks from imaging noise.
+MULTI_LAYER_REL_FLOOR = 0.45
 
 
 class TankAnalyzer:
@@ -75,6 +88,53 @@ class TankAnalyzer:
             return np.abs(g)
         return np.abs(np.diff(profile, prepend=profile[0]))
 
+    def _find_secondary_peak(
+        self,
+        grad: np.ndarray,
+        primary_idx: int,
+        min_sep: int,
+        floor: float,
+    ) -> int | None:
+        """Find the second strongest local max in ``grad`` that is at least
+        ``min_sep`` rows away from ``primary_idx`` and whose magnitude is
+        above ``floor``.
+
+        Returns the row index or None.
+        """
+        if grad.size < min_sep * 2 + 1:
+            return None
+        masked = grad.copy()
+        lo = max(0, primary_idx - min_sep)
+        hi = min(len(masked), primary_idx + min_sep + 1)
+        masked[lo:hi] = 0.0
+        idx = int(np.argmax(masked))
+        if masked[idx] < floor:
+            return None
+        return idx
+
+    def _alarms_state(self, t: dict, level_pct: float) -> dict[str, Any]:
+        """Derive per-tank HI/LO alarm booleans from the tank config.
+
+        Config shape (all optional):
+            alarms:
+              hi_pct: 90.0
+              lo_pct: 10.0
+        """
+        alarms = t.get("alarms") or {}
+        hi = alarms.get("hi_pct")
+        lo = alarms.get("lo_pct")
+        state: dict[str, Any] = {
+            "hi_pct": float(hi) if hi is not None else None,
+            "lo_pct": float(lo) if lo is not None else None,
+            "hi": False,
+            "lo": False,
+        }
+        if hi is not None and level_pct >= float(hi):
+            state["hi"] = True
+        if lo is not None and level_pct <= float(lo):
+            state["lo"] = True
+        return state
+
     # ----- public API ------------------------------------------------------
     def analyze(self, thermal: np.ndarray) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -107,6 +167,44 @@ class TankAnalyzer:
 
             min_delta = float(t.get("min_temp_delta", 1.0))
             confidence = "high" if peak_val >= min_delta else "low"
+
+            # Absolute row inside the sensor frame — the UI needs this to
+            # paint the level line on the canvas regardless of where the
+            # ROI lives.
+            interface_row_sensor = int(y0 + peak_idx)
+
+            # Optional secondary interface (air/liquid is primary; a second
+            # peak usually corresponds to a sludge or water-in-oil layer).
+            layers: list[dict[str, Any]] | None = None
+            if t.get("multi_layer"):
+                min_sep = max(3, int(n * MULTI_LAYER_MIN_SEP_FRAC))
+                floor = peak_val * MULTI_LAYER_REL_FLOOR
+                sec_idx = self._find_secondary_peak(grad, peak_idx, min_sep, floor)
+                layers = [
+                    {
+                        "label": "primary",
+                        "row": peak_idx,
+                        "row_sensor": interface_row_sensor,
+                        "level_pct": round(level_pct, 1),
+                        "gradient": round(peak_val, 3),
+                    }
+                ]
+                if sec_idx is not None:
+                    sec_level = (n - sec_idx) / n * 100.0
+                    if self.invert:
+                        sec_level = 100.0 - sec_level
+                    # Label by relative position — whichever peak is lower
+                    # in the tank is probably the sludge/water interface.
+                    secondary_label = "sludge" if sec_idx > peak_idx else "upper"
+                    layers.append(
+                        {
+                            "label": secondary_label,
+                            "row": int(sec_idx),
+                            "row_sensor": int(y0 + sec_idx),
+                            "level_pct": round(sec_level, 1),
+                            "gradient": round(float(grad[sec_idx]), 3),
+                        }
+                    )
 
             mean_inside = float(strip.mean())
             # Observe every frame (it's O(1) and feeds the temporal stdev),
@@ -150,6 +248,8 @@ class TankAnalyzer:
                     "minutes_to_empty": rate_snapshot.minutes_to_empty,
                 }
 
+            alarms_state = self._alarms_state(t, level_stable)
+
             results.append(
                 {
                     "id": t["id"],
@@ -166,13 +266,50 @@ class TankAnalyzer:
                     "temp_avg": round(mean_inside, 2),
                     "gradient_peak": round(peak_val, 3),
                     "interface_row": peak_idx,
+                    "interface_row_sensor": interface_row_sensor,
                     "confidence": confidence,
                     "roi": r,
                     "geometry": _geometry_dict(geometry) if geometry else None,
                     "reading": reading_dict,
+                    "alarms": alarms_state,
+                    "layers": layers,
                 }
             )
         return results
+
+    def analyze_detailed(self, thermal: np.ndarray, tank_id: str) -> dict[str, Any] | None:
+        """Expose the raw per-row profile + gradient for one tank.
+
+        Used by the ``Why this reading?`` operator explainer so the UI can
+        draw the thermal trace alongside the picked interface row. Re-runs
+        the same math as :meth:`analyze` for a single ROI so callers do not
+        have to pay for the full batch.
+        """
+        t = next((x for x in self.tanks if x.get("id") == tank_id), None)
+        if t is None:
+            return None
+        H, W = thermal.shape
+        r = t["roi"]
+        x0, y0 = max(0, int(r["x"])), max(0, int(r["y"]))
+        x1 = min(W, x0 + int(r["w"]))
+        y1 = min(H, y0 + int(r["h"]))
+        strip = thermal[y0:y1, x0:x1]
+        if strip.size == 0 or strip.shape[0] < 3:
+            return None
+        profile = self._profile(strip)
+        grad = self._gradient(profile)
+        peak_idx = int(np.argmax(grad))
+        return {
+            "id": t["id"],
+            "roi": r,
+            "profile": [round(float(v), 3) for v in profile],
+            "gradient": [round(float(v), 4) for v in grad],
+            "peak_idx": peak_idx,
+            "peak_val": round(float(grad[peak_idx]), 4),
+            "min_temp_delta": float(t.get("min_temp_delta", 1.0)),
+            "roi_height": int(strip.shape[0]),
+            "y0": y0,
+        }
 
 
 def _geometry_dict(g: Geometry) -> dict[str, Any]:

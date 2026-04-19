@@ -184,11 +184,18 @@ class WebServer:
                 h = w = 0
                 if s.rendered is not None:
                     h, w = s.rendered.shape[:2]
+                # Sensor dimensions (pre-upscale) — the UI needs these to
+                # translate interface_row_sensor + ROI to canvas coords
+                # without guessing the upscale ratio.
+                sh = sw = 0
+                if s.thermal is not None:
+                    sh, sw = s.thermal.shape[:2]
                 return {
                     "ts": int(s.ts * 1000),   # milliseconds, single source of truth
                     "frame_idx": s.frame_idx,
                     "fps": round(s.fps, 2),
                     "w": w, "h": h,
+                    "sensor_w": sw, "sensor_h": sh,
                     "upscale": s.rendered_upscale,
                     "tmin": round(s.tmin, 2),
                     "tmax": round(s.tmax, 2),
@@ -197,6 +204,7 @@ class WebServer:
                     "results": s.results,
                     "tanks": self.cfg().get("tanks", []),
                     "calibration": self.cfg().get("calibration"),
+                    "rotate_hint": s.rotate_hint,
                 }
             return jsonify(self._state_cache.get(build))
 
@@ -268,6 +276,34 @@ class WebServer:
             """
             return jsonify(PERF.snapshot())
 
+        @app.route("/api/tank/<tid>/gradient")
+        def api_tank_gradient(tid: str):
+            """Return the row-by-row thermal profile + |dT/dy| gradient for
+            one tank on the latest frame. Powers the "Why this reading?"
+            operator explainer — the UI draws the profile and the picked
+            peak row so users can see what the detector latched onto.
+            """
+            s = SHARED.snapshot()
+            if s.thermal is None:
+                return jsonify({"error": "no frame yet"}), 503
+            # Build a throwaway analyzer pinned to the current tank config.
+            # analyze_detailed is stateless per call, so we don't mutate
+            # any history the main-loop analyzer owns.
+            from analyzer import TankAnalyzer
+            cfg = self.cfg()
+            ana = TankAnalyzer(
+                cfg.get("tanks", []),
+                smoothing=cfg["analysis"].get("smoothing_window", 7),
+                method=cfg["analysis"].get("gradient_method", "sobel"),
+                invert_level=cfg["analysis"].get("invert_level", False),
+            )
+            detail = ana.analyze_detailed(s.thermal, tid)
+            if detail is None:
+                return jsonify({"error": "tank not found or roi empty"}), 404
+            # Also surface the live result (level_pct, confidence, etc.)
+            live = next((r for r in s.results if r.get("id") == tid), None)
+            return jsonify({"detail": detail, "live": live})
+
         @app.route("/api/events")
         def api_events():
             try:
@@ -286,6 +322,7 @@ class WebServer:
             "level_change", "low_confidence",
             "tank_added", "tank_removed",
             "calibrated", "auto_detect",
+            "alarm_hi", "alarm_lo", "alarm_clear",
         }
 
         @app.route("/api/alerts")
