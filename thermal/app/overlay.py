@@ -94,19 +94,33 @@ def draw_frame_overlay(img, *, tanks, results, tmin, tmax, hot, cold,
         for t in tanks:
             r = t["roi"]
             res = res_by_id.get(t["id"])
-            # colour by confidence
+            # v1.11: colour by reliability first (uniform = neutral grey,
+            # uncertain = amber), then by legacy confidence for backward
+            # compat with older results payloads.
             color = (0, 255, 0)
             if res is None:
                 color = (128, 128, 128)
+            elif res.get("reliability") == "uniform":
+                color = (148, 163, 184)     # slate — "can't tell"
+            elif res.get("reliability") == "uncertain":
+                color = (250, 204, 21)      # amber — "held at last good"
             elif res.get("confidence") != "high":
                 color = (0, 165, 255)
             cv2.rectangle(out, (r["x"], r["y"]),
                           (r["x"] + r["w"], r["y"] + r["h"]), color, 1)
-            if res is not None and overlay_cfg.get("level_line", True):
+            # Only draw the level line when we actually have a level. A
+            # uniform ROI has no meaningful interface to paint.
+            if (res is not None
+                and res.get("level_pct") is not None
+                and overlay_cfg.get("level_line", True)):
                 iy = r["y"] + int(res["interface_row"])
                 cv2.line(out, (r["x"], iy), (r["x"] + r["w"], iy), (0, 0, 255), 1)
             if overlay_cfg.get("tank_labels", True) and res is not None:
-                label = f"{t['id']} {res['level_pct']:.0f}%"
+                lvl = res.get("level_pct")
+                if lvl is None:
+                    label = f"{t['id']} --"
+                else:
+                    label = f"{t['id']} {lvl:.0f}%"
                 cv2.putText(out, label, (r["x"], max(9, r["y"] - 3)),
                             _FONT, 0.35, color, 1, cv2.LINE_AA)
 

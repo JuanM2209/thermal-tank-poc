@@ -49,8 +49,36 @@ v1.10 multi-phase detection (Gas / Oil / Water):
     floor with a minimum separation. ``phases`` in the result is the
     top-to-bottom list of bands with ``label`` (gas / oil / water / …),
     ``pct_top``, ``pct_bottom``, ``thickness_pct`` and ``temp_mean``.
-    ``level_pct`` stays backward-compatible: it points at the topmost
-    interface (= top of the first liquid band from the top).
+
+v1.11 Otsu contrast-first level detector:
+    The v1.10 gradient-peak detector fails on heterogeneous scenes that
+    don't have a clean horizontal liquid/gas interface — a rectangle drawn
+    over a wall, a warm hand or a water bottle placed inside the ROI. Any
+    gradient noise produced *some* argmax and the tank reported a bogus
+    level (typically 100 %).
+
+    v1.11 replaces the primary level estimate with a 2-class pixel
+    classifier:
+      1. Run Otsu's method over every ROI pixel → threshold T* and the
+         normalized between-class variance η ∈ [0, 1]. η ≈ 1 means the
+         histogram is cleanly bimodal (real interface). η < 0.3 means the
+         ROI is effectively uniform (no interface, or all the same class).
+      2. Hard uniform gates: `(T_max − T_min) < 2 °C` OR `std < 0.5 °C`
+         OR `η < 0.3` → `reliability="uniform"`, `level_pct = null`.
+         The UI renders "--" so the operator sees the system is *telling
+         it can't tell*, rather than a lie.
+      3. Auto-detect liquid polarity: whichever class dominates the
+         bottom 20 % of rows is taken as "liquid" (matches tank physics
+         whether oil is warm or cold). The per-tank `liquid_is_cold`
+         config can pin the polarity when needed.
+      4. `level_pct = 100 × liquid_pixel_fraction` — the fraction of ROI
+         pixels classified as liquid. Robust against bottle-in-middle
+         and hand-in-ROI scenarios because it reads object area rather
+         than a single horizontal edge.
+
+    The v1.10 gradient peaks are still computed for the `phases[]` band
+    list (used for stratified-tank overlays), so real oil/water tanks
+    that happen to show clean interfaces continue to get labelled bands.
 """
 
 from __future__ import annotations
@@ -117,6 +145,126 @@ MULTI_PEAK_MIN_SEP_FRAC = 0.08
 # which covers foam + gas + oil + water. Beyond that the operator is
 # looking at noise or a very unusual tank.
 MULTI_PEAK_MAX_COUNT = 3
+
+# --- v1.11 Otsu contrast-first tuning -----------------------------------
+# Between-class variance ratio (η ∈ [0,1]) below this => histogram is
+# effectively unimodal and we refuse to guess a level. 0.3 is the empirical
+# sweet spot: near-0 for uniform walls, > 0.5 for a real hand/bottle, > 0.7
+# for a clean tank interface.
+OTSU_ETA_MIN = 0.3
+# Strict contrast floor. An ROI spanning less than this many °C is declared
+# uniform even if Otsu finds a technically optimal split (the split is
+# dominated by sensor noise at that point).
+OTSU_CONTRAST_MIN_C = 2.0
+# Std-dev floor. Catches ROIs with one outlier bright pixel in an otherwise
+# uniform scene — those can clear the span gate but not this one.
+OTSU_STDDEV_MIN_C = 0.5
+# Fraction of the bottom rows used to auto-detect liquid polarity. If the
+# mean of the bottom 20 % of rows is below the Otsu threshold, the cold
+# class is declared "liquid"; else the warm class.
+OTSU_BOTTOM_WINDOW_FRAC = 0.2
+# Number of histogram bins used for the Otsu search. 64 is enough precision
+# for a typical 5-40 °C scene without being sensitive to noise.
+OTSU_HIST_BINS = 64
+
+
+def _otsu_threshold_eta(pixels: np.ndarray) -> tuple[float, float]:
+    """Compute an Otsu split on ``pixels`` (1-D flattened temperatures).
+
+    Returns
+    -------
+    threshold : float
+        Temperature in °C that maximizes between-class variance.
+    eta : float
+        Normalized between-class variance ∈ [0, 1]. 1 = perfectly bimodal,
+        0 = no class separation (uniform ROI).
+    """
+    flat = pixels.ravel().astype(np.float32)
+    if flat.size == 0:
+        return 0.0, 0.0
+    tmin, tmax = float(flat.min()), float(flat.max())
+    if tmax - tmin < 1e-6:
+        return 0.5 * (tmin + tmax), 0.0
+    hist, edges = np.histogram(flat, bins=OTSU_HIST_BINS, range=(tmin, tmax))
+    total = int(hist.sum())
+    if total == 0:
+        return 0.5 * (tmin + tmax), 0.0
+    mids = 0.5 * (edges[:-1] + edges[1:])
+    p = hist.astype(np.float64) / float(total)
+    cum_p = np.cumsum(p)
+    cum_m = np.cumsum(p * mids)
+    total_mean = float(cum_m[-1])
+    # σ_B²(t) = (total_mean·ω(t) − μ(t))² / (ω(t)·(1 − ω(t)))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        num = (total_mean * cum_p - cum_m) ** 2
+        den = cum_p * (1.0 - cum_p)
+        sigma_b_sq = np.where(den > 1e-12, num / den, 0.0)
+    i = int(np.argmax(sigma_b_sq))
+    threshold = float(mids[i])
+    sigma_b_max = float(sigma_b_sq[i])
+    var_total = float(flat.var())
+    eta = sigma_b_max / var_total if var_total > 1e-9 else 0.0
+    return threshold, float(max(0.0, min(1.0, eta)))
+
+
+def _otsu_level(
+    strip: np.ndarray,
+    liquid_is_cold: bool | None,
+) -> dict[str, Any]:
+    """2-class pixel classifier for a single ROI strip.
+
+    Parameters
+    ----------
+    strip : 2-D array of °C values (rows top→bottom, cols left→right).
+    liquid_is_cold : True forces cold=liquid, False forces warm=liquid,
+        None auto-detects from the bottom of the ROI.
+
+    Returns a dict with:
+        threshold_c           : Otsu split temperature
+        eta                   : between-class variance ratio ∈ [0, 1]
+        liquid_is_cold        : resolved polarity (True/False)
+        liquid_is_cold_auto   : whether polarity was auto-detected
+        liquid_fraction       : fraction of ROI pixels classified as liquid
+        liquid_fraction_rows  : per-row liquid fraction (list of h floats)
+        level_pct             : 100 × liquid_fraction
+        level_row             : row index that a bottom-packed liquid
+                                column of this level would reach
+    """
+    h, w = strip.shape
+    flat = strip.astype(np.float32).ravel()
+    threshold, eta = _otsu_threshold_eta(flat)
+
+    # --- auto-detect polarity from bottom rows -----------------------
+    auto_bool = False
+    if liquid_is_cold is None:
+        auto_bool = True
+        bottom_n = max(1, int(round(h * OTSU_BOTTOM_WINDOW_FRAC)))
+        bottom_mean = float(strip[h - bottom_n :].mean())
+        liquid_is_cold = bool(bottom_mean <= threshold)
+
+    if liquid_is_cold:
+        mask = strip < threshold
+    else:
+        mask = strip > threshold
+
+    liquid_fraction = float(mask.mean()) if mask.size else 0.0
+    liquid_rows = mask.mean(axis=1).astype(np.float32)
+    level_pct = 100.0 * liquid_fraction
+    # Bottom-packed equivalent: how many rows of liquid would stack up from
+    # the bottom of the ROI at this fraction. Purely for the drawn level line.
+    filled_rows = int(round(h * liquid_fraction))
+    level_row = max(0, min(h - 1, h - filled_rows)) if h > 0 else 0
+
+    return {
+        "threshold_c": float(threshold),
+        "eta": float(eta),
+        "liquid_is_cold": bool(liquid_is_cold),
+        "liquid_is_cold_auto": bool(auto_bool),
+        "liquid_fraction": float(liquid_fraction),
+        "liquid_fraction_rows": liquid_rows,
+        "level_pct": float(level_pct),
+        "level_row": int(level_row),
+    }
 
 
 class TankAnalyzer:
@@ -407,83 +555,108 @@ class TankAnalyzer:
             grad = self._gradient(profile)
             n = len(profile)
             min_delta = float(t.get("min_temp_delta", 1.0))
+            strip_span = float(strip.max() - strip.min())
+            strip_std = float(strip.std())
 
-            # --- v1.10 multi-peak detection ----------------------------
-            # Find up to 3 real interfaces (= 4 phases). When the tank is
-            # uniform or the gradient is below the noise floor, `peaks`
-            # is empty and we fall back to np.argmax for the reliability
-            # check so the operator still gets a diagnostic row_idx.
+            # --- v1.10 multi-peak detection (for phase-band display) ---
+            # These still run in v1.11 — they populate `phases[]` used for
+            # the stratification overlay when a real oil/water tank shows
+            # clean horizontal interfaces. The primary level signal now
+            # comes from the Otsu classifier below, not from these peaks.
             peaks = self._find_peaks(grad, min_delta)
             if peaks:
-                peak_idx_raw = peaks[0]
+                peak_idx_grad = peaks[0]
             else:
-                peak_idx_raw = int(np.argmax(grad))
-            peak_val = float(grad[peak_idx_raw])
+                peak_idx_grad = int(np.argmax(grad))
+            peak_val = float(grad[peak_idx_grad])
+            phases = self._build_phases(profile, peaks)
 
-            # --- reliability layer -------------------------------------
-            # Before trusting peak_idx, check for uniform-ROI, bad step
-            # shape, and temporal spikes.
-            rel = self._reliability_check(
-                tank_id=t["id"],
-                profile=profile,
-                grad=grad,
-                peak_idx=peak_idx_raw,
-                peak_val=peak_val,
-                min_delta=min_delta,
+            # --- v1.11 Otsu 2-class pixel classifier (primary level) ----
+            # Default polarity is auto — the config can pin it per tank
+            # with `liquid_is_cold: true|false` when the operator knows.
+            polarity_cfg = t.get("liquid_is_cold")
+            polarity_override = (
+                bool(polarity_cfg) if isinstance(polarity_cfg, bool) else None
             )
-            reliability = rel["reliability"]
-            reliability_reasons = rel["reasons"]
-            peak_idx = int(rel["effective_peak_idx"])
+            otsu = _otsu_level(strip, polarity_override)
+            otsu_eta = float(otsu["eta"])
 
-            # v1.10: when ROI is uniform we refuse to guess a level —
-            # an empty tank and a uniformly-heated full tank look the
-            # same from a single vertical strip.
-            if reliability == "uniform":
+            # --- Three uniform gates (any failure => no level reported) -
+            uniform_reasons: list[str] = []
+            if strip_span < OTSU_CONTRAST_MIN_C:
+                uniform_reasons.append("low_contrast")
+            if strip_std < OTSU_STDDEV_MIN_C:
+                uniform_reasons.append("low_stddev")
+            if otsu_eta < OTSU_ETA_MIN:
+                uniform_reasons.append("weak_bimodality")
+
+            reliability_reasons: list[str] = []
+            level_pct: float | None
+            if uniform_reasons:
+                # ROI is effectively uniform — refuse to guess. The UI
+                # renders "--" and the operator can read the temperatures
+                # directly to decide if the tank is full-of-cold-liquid or
+                # truly empty.
+                reliability = "uniform"
+                reliability_reasons = uniform_reasons
                 level_pct = None
+                peak_idx = int(otsu["level_row"])
             else:
-                level_pct = (n - peak_idx) / n * 100.0
+                reliability = "ok"
+                level_pct = float(otsu["level_pct"])
                 if self.invert:
                     level_pct = 100.0 - level_pct
+                peak_idx = int(otsu["level_row"])
 
-            hist = self._level_hist.setdefault(t["id"], deque(maxlen=5))
+            # --- Temporal MAD: reject single-frame spikes ---------------
+            # A genuine level moves over seconds; a 10+ % jump in one frame
+            # is almost always a hand passing through the ROI. Clamp to
+            # the rolling median and mark the reading uncertain.
+            hist_peak = self._peak_hist.setdefault(
+                t["id"], deque(maxlen=TEMPORAL_WINDOW)
+            )
+            if reliability == "ok" and len(hist_peak) >= 3:
+                med = float(np.median(hist_peak))
+                mad = float(
+                    np.median(
+                        np.abs(np.array(hist_peak, dtype=np.float32) - med)
+                    )
+                ) or 1.0
+                if abs(peak_idx - med) > TEMPORAL_MAD_K * mad:
+                    reliability = "uncertain"
+                    reliability_reasons = ["temporal_spike"]
+            if reliability == "ok":
+                hist_peak.append(int(peak_idx))
 
+            # --- Stable-level median smoother --------------------------
+            hist_level = self._level_hist.setdefault(t["id"], deque(maxlen=5))
             level_stable: float | None
-            if reliability == "uncertain":
-                # Don't pollute the median with garbage frames — fall back
-                # to the last known-good reading if we have one.
+            if reliability == "ok":
+                assert level_pct is not None
+                hist_level.append(level_pct)
+                level_stable = float(np.median(hist_level))
+                self._last_good[t["id"]] = {
+                    "level_pct": level_stable,
+                    "peak_idx": peak_idx,
+                }
+            elif reliability == "uncertain":
+                # Fall back to the last known-good reading so the UI has
+                # a stable number to display while the spike dies down.
                 last_good = self._last_good.get(t["id"])
                 if last_good is not None:
                     level_stable = float(last_good["level_pct"])
                     peak_idx = int(last_good["peak_idx"])
                     level_pct = level_stable
                 else:
-                    # No history yet (cold start, or never had an OK
-                    # frame): we refuse to make up a number.
                     level_stable = None
-            elif reliability == "uniform":
-                # Uniform ROI — no interface to track, no history to
-                # update. UI renders "--".
+            else:  # uniform
                 level_stable = None
-            else:
-                # ok: fold into median history AND update last_good.
-                assert level_pct is not None
-                hist.append(level_pct)
-                level_stable = float(np.median(hist))
-                self._last_good[t["id"]] = {
-                    "level_pct": level_stable,
-                    "peak_idx": peak_idx,
-                }
 
-            # v1.10: phase bands — top→bottom list of {label, pct_top,
-            # pct_bottom, thickness_pct, temp_mean}. 1 band when uniform
-            # or single-peak low-quality, 2+ when real interfaces found.
-            phases = self._build_phases(profile, peaks)
-
-            # Confidence still tracks the gradient gate — it's a strictly
-            # narrower signal than reliability. A frame can have high
-            # confidence (strong gradient) but still be uncertain (edge
-            # artifact in the top row).
-            confidence = "high" if peak_val >= min_delta else "low"
+            # Confidence is now anchored to Otsu η rather than the raw
+            # gradient magnitude: a "high" confidence frame means the
+            # histogram is cleanly bimodal, which is the correct signal
+            # to gate level publishing on.
+            confidence = "high" if otsu_eta >= OTSU_ETA_MIN else "low"
 
             # Absolute row inside the sensor frame — the UI needs this to
             # paint the level line on the canvas regardless of where the
@@ -492,11 +665,16 @@ class TankAnalyzer:
 
             # Optional secondary interface (air/liquid is primary; a second
             # peak usually corresponds to a sludge or water-in-oil layer).
+            # v1.11: search is anchored to the gradient primary peak so the
+            # "avoid neighborhood" logic operates on thermal interfaces, not
+            # on the Otsu level row.
             layers: list[dict[str, Any]] | None = None
-            if t.get("multi_layer"):
+            if t.get("multi_layer") and level_pct is not None:
                 min_sep = max(3, int(n * MULTI_LAYER_MIN_SEP_FRAC))
                 floor = peak_val * MULTI_LAYER_REL_FLOOR
-                sec_idx = self._find_secondary_peak(grad, peak_idx, min_sep, floor)
+                sec_idx = self._find_secondary_peak(
+                    grad, peak_idx_grad, min_sep, floor
+                )
                 layers = [
                     {
                         "label": "primary",
@@ -512,7 +690,9 @@ class TankAnalyzer:
                         sec_level = 100.0 - sec_level
                     # Label by relative position — whichever peak is lower
                     # in the tank is probably the sludge/water interface.
-                    secondary_label = "sludge" if sec_idx > peak_idx else "upper"
+                    secondary_label = (
+                        "sludge" if sec_idx > peak_idx_grad else "upper"
+                    )
                     layers.append(
                         {
                             "label": secondary_label,
@@ -593,6 +773,18 @@ class TankAnalyzer:
                     "confidence": confidence,
                     "reliability": reliability,
                     "reliability_reasons": reliability_reasons,
+                    # v1.11 Otsu fields ------------------------------------
+                    # `eta` is the normalized between-class variance (0..1).
+                    # The UI uses it as a "confidence" number — > 0.6 is a
+                    # clean interface, 0.3..0.6 is marginal, below = uniform.
+                    "eta": round(otsu_eta, 3),
+                    "otsu_threshold_c": round(float(otsu["threshold_c"]), 2),
+                    "liquid_fraction": round(float(otsu["liquid_fraction"]), 3),
+                    "liquid_is_cold": bool(otsu["liquid_is_cold"]),
+                    "liquid_is_cold_auto": bool(otsu["liquid_is_cold_auto"]),
+                    "strip_span_c": round(strip_span, 2),
+                    "strip_std_c": round(strip_std, 2),
+                    # ----------------------------------------------------
                     "roi": r,
                     "geometry": _geometry_dict(geometry) if geometry else None,
                     "reading": reading_dict,
@@ -625,42 +817,58 @@ class TankAnalyzer:
         profile = self._profile(strip)
         grad = self._gradient(profile)
         min_delta = float(t.get("min_temp_delta", 1.0))
-        # v1.10: run the same multi-peak pipeline the analyze() call uses so
-        # the Why modal surfaces the exact same interface rows and phase
-        # bands the main card shows.
+        strip_span = float(strip.max() - strip.min())
+        strip_std = float(strip.std())
+        # v1.10 multi-peak (for the phase bar overlay in the Why modal)
         peaks = self._find_peaks(grad, min_delta)
-        peak_idx = peaks[0] if peaks else int(np.argmax(grad))
-        peak_val = float(grad[peak_idx])
-        # Re-run the reliability check so the Why modal can surface the same
-        # reasons the analyzer used. Does not mutate history (that's the
-        # analyze() call's job).
-        saved_hist = list(self._peak_hist.get(t["id"], ()))
-        rel = self._reliability_check(
-            tank_id=t["id"],
-            profile=profile,
-            grad=grad,
-            peak_idx=peak_idx,
-            peak_val=peak_val,
-            min_delta=min_delta,
-        )
-        # Restore history — analyze_detailed is a read-only diagnostic path
-        # and should not influence the temporal MAD.
-        self._peak_hist[t["id"]] = deque(saved_hist, maxlen=TEMPORAL_WINDOW)
+        peak_idx_grad = peaks[0] if peaks else int(np.argmax(grad))
+        peak_val = float(grad[peak_idx_grad])
         phases = self._build_phases(profile, peaks)
+
+        # v1.11 Otsu — the primary level signal. Mirrors analyze() so the
+        # Why modal shows exactly the same reasoning the live card used.
+        polarity_cfg = t.get("liquid_is_cold")
+        polarity_override = (
+            bool(polarity_cfg) if isinstance(polarity_cfg, bool) else None
+        )
+        otsu = _otsu_level(strip, polarity_override)
+        otsu_eta = float(otsu["eta"])
+
+        uniform_reasons: list[str] = []
+        if strip_span < OTSU_CONTRAST_MIN_C:
+            uniform_reasons.append("low_contrast")
+        if strip_std < OTSU_STDDEV_MIN_C:
+            uniform_reasons.append("low_stddev")
+        if otsu_eta < OTSU_ETA_MIN:
+            uniform_reasons.append("weak_bimodality")
+        reliability = "uniform" if uniform_reasons else "ok"
+
+        peak_idx = int(otsu["level_row"])
         return {
             "id": t["id"],
             "roi": r,
             "profile": [round(float(v), 3) for v in profile],
             "gradient": [round(float(v), 4) for v in grad],
             "peak_idx": peak_idx,
+            "peak_idx_grad": int(peak_idx_grad),
             "peaks": [int(p) for p in peaks],
             "peak_val": round(peak_val, 4),
             "min_temp_delta": min_delta,
             "roi_height": int(strip.shape[0]),
             "y0": y0,
-            "reliability": rel["reliability"],
-            "reliability_reasons": rel["reasons"],
-            "strip_span": round(float(rel["strip_span"]), 3),
+            "reliability": reliability,
+            "reliability_reasons": uniform_reasons,
+            "strip_span": round(strip_span, 3),
+            "strip_std": round(strip_std, 3),
+            "eta": round(otsu_eta, 3),
+            "otsu_threshold_c": round(float(otsu["threshold_c"]), 2),
+            "liquid_fraction": round(float(otsu["liquid_fraction"]), 3),
+            "liquid_fraction_rows": [
+                round(float(v), 3) for v in otsu["liquid_fraction_rows"]
+            ],
+            "liquid_is_cold": bool(otsu["liquid_is_cold"]),
+            "liquid_is_cold_auto": bool(otsu["liquid_is_cold_auto"]),
+            "level_pct_raw": round(float(otsu["level_pct"]), 1),
             "phases": phases,
         }
 

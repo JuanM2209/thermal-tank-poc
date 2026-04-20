@@ -209,6 +209,11 @@ INDEX_HTML = r"""<!doctype html>
     .alarm-pill{font-size:.55rem;letter-spacing:.14em;text-transform:uppercase;font-weight:800;padding:2px 6px;border-radius:3px;font-family:ui-monospace,SFMono-Regular,monospace}
     .alarm-pill.hi{background:rgba(220,38,38,.18);color:#fca5a5;border:1px solid #991b1b}
     .alarm-pill.lo{background:rgba(234,179,8,.18);color:#fde68a;border:1px solid #854d0e}
+    /* v1.11 Otsu η confidence chip — shows how bimodal the ROI is. */
+    .eta-chip{font-size:.55rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:2px 6px;border-radius:3px;font-family:ui-monospace,SFMono-Regular,monospace;border:1px solid transparent;cursor:help}
+    .eta-chip.good{background:rgba(16,185,129,.14);color:#34d399;border-color:#065f46}
+    .eta-chip.marg{background:rgba(234,179,8,.12);color:#fde68a;border-color:#854d0e}
+    .eta-chip.weak{background:rgba(100,116,139,.15);color:#cbd5e1;border-color:#475569}
 
     /* Tank card inspect / why buttons */
     .tank-actions .btn.sm.inspect{background:#0c4a6e;border-color:#0369a1;color:#bae6fd}
@@ -414,6 +419,14 @@ INDEX_HTML = r"""<!doctype html>
               <span class="alarm-pill hi" x-show="t.alarms?.hi" title="HI alarm tripped">HI</span>
               <span class="alarm-pill lo" x-show="t.alarms?.lo" title="LO alarm tripped">LO</span>
             </div>
+            <!-- v1.11: Otsu η confidence chip. Signals how bimodal the ROI
+                 histogram is (1.00 = two cleanly-separated temperature classes,
+                 0.00 = uniform). Hover for the raw number + threshold. -->
+            <span class="eta-chip"
+                  x-show="t.eta != null"
+                  :class="etaChipClass(t)"
+                  :title="etaChipTitle(t)"
+                  x-text="'\u03b7 ' + (t.eta != null ? t.eta.toFixed(2) : '--')"></span>
             <div class="tank-status" :class="tankStatus(t).klass" x-text="tankStatus(t).label"></div>
           </div>
         </div>
@@ -552,7 +565,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.10</span>
+    <span>Operator Console v1.11</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -815,7 +828,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.10 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.11 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -1268,19 +1281,50 @@ function app(){
       return 'TOTAL VOLUME CAPACITY  ' + Math.round(full).toLocaleString() + ' BBL';
     },
     reliabilityNote(t){
-      if (t.reliability === 'uniform') return 'Uniform ROI \u2014 no thermal interface visible (empty, full, or uniformly-heated tank)';
-      if (t.reliability !== 'uncertain') return '';
-      const reasons = t.reliability_reasons || [];
       const friendly = {
-        edge_clip:     'hot/cold object at edge of ROI',
-        weak_step:     'temperature gradient too shallow',
-        noisy_halves:  'inside ROI is not uniform',
-        temporal_spike:'reading spiked this frame',
-        flat_profile:  'no thermal contrast',
-        uniform_roi:   'no interface visible',
+        // v1.11 Otsu reasons
+        low_contrast:   'ROI temperature span under 2 \u00b0C',
+        low_stddev:     'ROI pixels too uniform (std < 0.5 \u00b0C)',
+        weak_bimodality:'no two distinct temperature classes (\u03b7 < 0.30)',
+        // carried over from v1.10 temporal guard
+        temporal_spike: 'reading jumped \u2014 likely a hand/bottle passing through',
+        // legacy reason codes (kept for backward compat with older workers)
+        edge_clip:      'hot/cold object at edge of ROI',
+        weak_step:      'temperature gradient too shallow',
+        noisy_halves:   'inside ROI is not uniform',
+        flat_profile:   'no thermal contrast',
+        uniform_roi:    'no interface visible',
       };
-      const msg = reasons.map(r => friendly[r] || r).join(', ') || 'unreliable reading';
-      return 'Uncertain: ' + msg;
+      const reasons = (t.reliability_reasons || []).map(r => friendly[r] || r);
+      if (t.reliability === 'uniform') {
+        const detail = reasons.join(', ') || 'ROI is thermally uniform';
+        return 'Uniform ROI \u2014 ' + detail + '. System can\u2019t tell empty from full without a reference.';
+      }
+      if (t.reliability === 'uncertain') {
+        return 'Uncertain: ' + (reasons.join(', ') || 'unreliable reading');
+      }
+      return '';
+    },
+    etaChipClass(t){
+      const e = t?.eta;
+      if (e == null) return 'weak';
+      if (e >= 0.60) return 'good';
+      if (e >= 0.30) return 'marg';
+      return 'weak';
+    },
+    etaChipTitle(t){
+      const e = t?.eta;
+      if (e == null) return 'Otsu \u03b7 \u2014 bimodality score not available';
+      const thr = t.otsu_threshold_c;
+      const lf  = t.liquid_fraction;
+      const pol = t.liquid_is_cold === false ? 'warm pixels' : 'cold pixels';
+      const auto= t.liquid_is_cold_auto ? ' (auto)' : '';
+      const span= t.strip_span_c;
+      let s = 'Otsu \u03b7 = ' + e.toFixed(3) + '  (1.0 = perfectly bimodal, < 0.30 = uniform)';
+      if (thr != null)  s += '\nSplit temp: ' + thr.toFixed(2) + ' \u00b0C';
+      if (lf  != null)  s += '\nLiquid pixels (' + pol + auto + '): ' + Math.round(lf*100) + '%';
+      if (span != null) s += '\nROI span: ' + span.toFixed(2) + ' \u00b0C';
+      return s;
     },
     rateClass(t){
       const r = t.reading?.fill_rate_bbl_h;
@@ -2005,33 +2049,40 @@ function app(){
       const d = this.why.detail;
       const lv = this.why.live;
       if (!d || !lv) return '';
-      // v1.10: handle the "uniform" verdict explicitly — the explainer
-      // should say "no interface found" instead of inventing a row index.
-      if (lv.reliability === 'uniform') {
-        return 'The ROI is thermally uniform — no clear liquid/air (or oil/water) interface is visible. ' +
-               'This happens when the tank is empty, full of a uniformly-heated liquid, or the ROI is too narrow to capture the surface. ' +
-               'Lower min_temp_delta in Edit to force a reading, or move the ROI to cover both sides of the expected interface.';
-      }
       const phases = Array.isArray(d.phases) ? d.phases : [];
-      const pass = this.whyPeakPass();
-      const pct = (lv.level_pct||0).toFixed(1);
-      const row = d.peak_idx;
-      const total = d.roi_height;
-      const peak = (d.peak_val||0).toFixed(2);
-      const gate = (d.min_temp_delta||0).toFixed(2);
-      let s = 'Inside the ROI (' + total + ' rows tall) the sharpest vertical temperature change is at row ' + row +
-              ' \u2014 a gradient magnitude of ' + peak + ' \u00b0C/row. ';
-      if (pass) {
-        s += 'That is above the confidence gate (' + gate + ' \u00b0C/row), so the detector trusts this as the primary interface. ';
-        s += 'The level is reported as ' + pct + '% of the tank height (ROI bottom \u2192 top).';
-      } else {
-        s += 'That is BELOW the gate (' + gate + ' \u00b0C/row), so the detector flags the reading as LOW CONFIDENCE. ';
-        s += 'Common causes: the tank is thermally uniform, the ROI is too narrow, or ambient is drifting. ';
-        s += 'Lower min_temp_delta in Edit to accept weaker gradients.';
+      const eta   = (d.eta != null) ? d.eta.toFixed(3) : '--';
+      const thr   = (d.otsu_threshold_c != null) ? d.otsu_threshold_c.toFixed(2) : '--';
+      const lfpct = (d.liquid_fraction != null) ? Math.round(d.liquid_fraction*100) : null;
+      const span  = (d.strip_span != null) ? d.strip_span.toFixed(2) : '--';
+      const polarity = d.liquid_is_cold === false ? 'warmer' : 'cooler';
+      const auto  = d.liquid_is_cold_auto ? ' (auto-detected from the bottom of the ROI)' : '';
+      // v1.11: handle the "uniform" verdict explicitly — walk through
+      // which of the three gates the ROI failed so the operator knows
+      // exactly why no number is being reported.
+      if (lv.reliability === 'uniform') {
+        const reasons = (lv.reliability_reasons || []).join(', ');
+        let s = 'No reading: the ROI is thermally uniform. ' +
+                'Span = ' + span + ' \u00b0C, Otsu \u03b7 = ' + eta +
+                ' (need \u2265 2.00 \u00b0C span AND \u03b7 \u2265 0.30 to split pixels into two classes). ';
+        if (reasons) s += 'Failed gates: ' + reasons + '. ';
+        s += 'Put a thermal contrast inside the ROI (cooler/warmer object, or fill a real tank) to get a level reading. ' +
+             'An empty tank and a uniformly-heated full tank look identical from a single thermal strip \u2014 the operator ' +
+             'has to read the absolute temperatures (min/avg/max on the card) to tell them apart.';
+        return s;
       }
+      let s = 'Inside the ROI (' + d.roi_height + ' rows tall) Otsu split the pixels at ' + thr +
+              ' \u00b0C with \u03b7 = ' + eta + ' (1.0 = perfectly bimodal). ';
+      if (lfpct != null) {
+        s += 'Pixels ' + polarity + ' than the split' + auto + ' are treated as \u201cliquid\u201d \u2014 they cover ' +
+             lfpct + '% of the ROI. ';
+      }
+      s += 'Level is reported as ' + (lv.level_pct||0).toFixed(1) + '% of the tank height.';
       if (phases.length >= 2) {
         const labels = phases.map(p => p.label + ' (' + p.thickness_pct + '%)').join(' / ');
-        s += ' Multi-phase detected: ' + labels + '.';
+        s += ' Gradient-peak multi-phase overlay: ' + labels + '.';
+      }
+      if (lv.reliability === 'uncertain') {
+        s += ' Reading held at the last stable value \u2014 a one-frame spike tripped the temporal MAD guard.';
       }
       return s;
     },
