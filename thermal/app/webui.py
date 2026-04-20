@@ -195,6 +195,13 @@ INDEX_HTML = r"""<!doctype html>
     .inspector-alarm-line.lo .tag{color:#f59e0b}
     .inspector-close{position:absolute;pointer-events:auto;background:rgba(5,7,10,.85);border:1px solid #334155;color:#cbd5e1;font-size:.65rem;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;letter-spacing:.1em}
     .inspector-close:hover{background:#1e293b;color:#fff}
+    /* v1.12: detail block lives OUTSIDE the ROI, stacked top-to-bottom */
+    .inspector-detail{position:absolute;display:flex;flex-direction:column;align-items:flex-start;gap:2px;pointer-events:none;font-family:ui-monospace,SFMono-Regular,monospace}
+    .inspector-detail .line{background:rgba(5,7,10,.88);color:#e2e8f0;font-size:.70rem;font-weight:800;padding:3px 8px;border-radius:3px;letter-spacing:.09em;white-space:nowrap;border:1px solid rgba(56,189,248,.45)}
+    .inspector-detail .line.primary{background:#38bdf8;color:#041026;border-color:#38bdf8}
+    .inspector-detail.uniform .line.primary{background:#94a3b8;color:#0b1220;border-color:#94a3b8}
+    .inspector-detail.uncertain .line.primary{background:#facc15;color:#111;border-color:#facc15}
+    .inspector-detail.alert .line.primary{background:#f87171;color:#0b0409;border-color:#f87171}
 
     /* Camera orientation banner (auto-rotate hint) */
     .hint-banner{background:linear-gradient(90deg,#0c4a6e,#1e3a8a);border:1px solid #0369a1;border-radius:10px;padding:.5rem .75rem;display:flex;align-items:center;gap:.5rem}
@@ -372,18 +379,25 @@ INDEX_HTML = r"""<!doctype html>
         </template>
       </div>
 
-      <!-- Tank Inspector overlay (v1.7) — click any tank card's "Inspect"
-           button to highlight its perimeter on the live feed with a dashed
-           level line and a floating "% · FT · BBL" label, plus optional
-           HI/LO alarm guide lines. -->
+      <!-- Tank Inspector overlay (v1.7, v1.12) — click any tank card's
+           "Inspect" button to highlight its perimeter on the live feed
+           with a dashed level line. v1.12 moves the "% · FT · BBL"
+           detail block OUTSIDE the ROI as a multi-line stack so the
+           thermal image inside the box stays clean. -->
       <div class="inspector-overlay" x-show="inspector.tankId" x-transition>
         <template x-if="inspectedTank()">
           <div>
             <div class="inspector-box" :class="inspectorBoxCls()" :style="inspectorBoxStyle()"></div>
-            <!-- primary level line -->
-            <div class="inspector-line" :class="inspectorLineCls()" :style="inspectorLineStyle('primary')">
-              <span class="tag" x-text="inspectorPrimaryLabel()"></span>
+            <!-- v1.12 detail stack: primary line shows LEVEL/UNIFORM/UNCERTAIN;
+                 supplementary lines show FT and BBL when geometry is defined. -->
+            <div class="inspector-detail" :class="inspectorDetailCls()" :style="inspectorDetailStyle()">
+              <template x-for="(txt, i) in inspectorDetailLines()" :key="i">
+                <div class="line" :class="i===0?'primary':'sub'" x-text="txt"></div>
+              </template>
             </div>
+            <!-- primary level line — dashed horizontal, NO big centered tag
+                 in v1.12 (detail lives above the ROI now). -->
+            <div class="inspector-line" :class="inspectorLineCls()" :style="inspectorLineStyle('primary')"></div>
             <!-- secondary layer (sludge) when multi_layer on -->
             <template x-if="inspectorHasSecondary()">
               <div class="inspector-line secondary" :style="inspectorLineStyle('secondary')">
@@ -565,7 +579,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.11</span>
+    <span>Operator Console v1.12</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -828,7 +842,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.11 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.12 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -1286,6 +1300,8 @@ function app(){
         low_contrast:   'ROI temperature span under 2 \u00b0C',
         low_stddev:     'ROI pixels too uniform (std < 0.5 \u00b0C)',
         weak_bimodality:'no two distinct temperature classes (\u03b7 < 0.30)',
+        // v1.12 physics guard
+        low_monotonicity:'liquid is not piled at the bottom (object in ROI?)',
         // carried over from v1.10 temporal guard
         temporal_spike: 'reading jumped \u2014 likely a hand/bottle passing through',
         // legacy reason codes (kept for backward compat with older workers)
@@ -1906,17 +1922,61 @@ function app(){
       return `left:${left}px;top:${y}px;width:${width}px`;
     },
     inspectorPrimaryLabel(){
+      // Kept for backward compatibility — v1.12 uses inspectorDetailLines()
+      // for the new stacked label above the ROI. This function is still
+      // called by older builds / debug paths.
       const t = this.inspectedTank();
       if (!t) return '';
-      // v1.10: keep the label compact so the tag stays on ONE line even
-      // for narrow ROIs. The .reliability-note on the card already tells
-      // the operator WHY it's uncertain or uniform.
       if (t.reliability === 'uniform')   return 'UNIFORM';
       if (t.reliability === 'uncertain') return 'UNCERTAIN';
       const pct = (t.level_pct != null ? t.level_pct.toFixed(1) : '--') + '%';
-      const ft = t.reading?.level_ft != null ? (' \u00b7 ' + t.reading.level_ft.toFixed(2) + ' ft') : '';
-      const bbl = t.reading?.volume_bbl != null ? (' \u00b7 ' + Math.round(t.reading.volume_bbl) + ' BBL') : '';
-      return 'LEVEL ' + pct + ft + bbl;
+      return 'LEVEL ' + pct;
+    },
+    // v1.12 — multi-line detail stack rendered ABOVE the ROI.
+    // Returns an array of strings, top-to-bottom. First element is the
+    // primary (gets highlighted background), rest are supplementary.
+    inspectorDetailLines(){
+      const t = this.inspectedTank();
+      if (!t) return [];
+      if (t.reliability === 'uniform')   return [t.name + ' \u2014 UNIFORM'];
+      if (t.reliability === 'uncertain') return [t.name + ' \u2014 UNCERTAIN'];
+      const pct = t.level_pct != null ? t.level_pct.toFixed(1) : '--';
+      const lines = ['LEVEL ' + pct + '%'];
+      const ft = t.reading?.level_ft;
+      const bbl = t.reading?.volume_bbl;
+      if (ft != null)  lines.push(ft.toFixed(2) + ' FT');
+      if (bbl != null) lines.push(Math.round(bbl).toLocaleString() + ' BBL');
+      return lines;
+    },
+    inspectorDetailCls(){
+      const t = this.inspectedTank();
+      if (!t) return '';
+      if (t.reliability === 'uniform')   return 'uniform';
+      if (t.reliability === 'uncertain') return 'uncertain';
+      if (t.alarms?.hi || t.alarms?.lo)  return 'alert';
+      return '';
+    },
+    inspectorDetailStyle(){
+      const t = this.inspectedTank();
+      const g = this._inspectorImgRect();
+      if (!t || !g || !t.roi) return 'display:none';
+      // Anchor the detail stack at the top-LEFT corner of the ROI,
+      // positioned ABOVE the ROI. We use bottom-positioning so the stack
+      // grows upward and the bottom line always sits immediately over
+      // the ROI top edge, regardless of how many supplementary lines
+      // are present (LEVEL-only, LEVEL+FT, or LEVEL+FT+BBL).
+      const x = g.offX + t.roi.x * g.sx;
+      const topOfRoi = g.offY + t.roi.y * g.sy;
+      // Container positioning: bottom = distance from canvas top of the
+      // ROI top edge, minus a small padding. Expressed as a top value by
+      // subtracting an upper-bound stack height (≈70 px for 3 lines).
+      // Flex align-items:flex-end + justify-content:flex-end would be
+      // cleaner, but we keep absolute top anchoring to avoid relayout.
+      const padding = 6;
+      // Render stack with `transform: translateY(-100%)` so its bottom
+      // aligns with the anchor y. Trick: anchor on top of ROI, then
+      // shift up by the natural stack height.
+      return `left:${x}px;top:${topOfRoi - padding}px;transform:translateY(-100%)`;
     },
     inspectorHasSecondary(){
       const t = this.inspectedTank();

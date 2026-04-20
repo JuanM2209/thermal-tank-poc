@@ -66,6 +66,77 @@ def _fmt_temp(t: float, unit: str = "C") -> str:
     return f"{t:.1f}C"
 
 
+def _tank_label_lines(tank: dict, res: dict | None) -> list[str]:
+    """Build the stacked label lines drawn above a tank ROI.
+
+    v1.12: the operator asked for the detail block to live OUTSIDE the
+    ROI so the thermal image inside the box stays clean. We emit up to
+    three lines: ``LEVEL 80 %`` + ``10.86 FT`` + ``154 BBL`` when a
+    ``reading`` is present, and fall back to a single compact line when
+    the tank has no geometry or the reading is suppressed.
+    """
+    tid = tank.get("id", "?")
+    if res is None:
+        return [tid]
+    reliability = res.get("reliability")
+    if reliability == "uniform":
+        return [f"{tid} UNIFORM"]
+    if reliability == "uncertain":
+        return [f"{tid} UNCERTAIN"]
+    lvl = res.get("level_pct")
+    if lvl is None:
+        return [f"{tid} --"]
+    lines = [f"{tid} LVL {lvl:.0f}%"]
+    reading = res.get("reading") or {}
+    ft = reading.get("level_ft")
+    bbl = reading.get("volume_bbl")
+    if ft is not None:
+        lines.append(f"{float(ft):.2f} FT")
+    if bbl is not None:
+        lines.append(f"{int(round(float(bbl)))} BBL")
+    return lines
+
+
+def _draw_tank_label_stack(
+    img,
+    x: int,
+    y_top_of_roi: int,
+    lines: list[str],
+    color: tuple[int, int, int],
+    fs: float = 0.35,
+) -> None:
+    """Draw a vertical stack of label lines above the ROI top edge.
+
+    Lines are right-side up (top-most line is furthest from the ROI),
+    so the operator reads top-to-bottom as: level %, height, volume.
+    Falls back to drawing the primary line only if there is no room
+    above the ROI for the full stack.
+    """
+    if not lines:
+        return
+    H = img.shape[0]
+    th = 1
+    # Measure line height from the first line; cv2.putText uses baseline
+    # anchoring so we add a small padding between lines.
+    (_, line_h), _ = cv2.getTextSize(lines[0], _FONT, fs, th)
+    pad = 2
+    total_h = (line_h + pad) * len(lines)
+    start_y = y_top_of_roi - pad  # baseline of the LAST (closest-to-ROI) line
+    if start_y - total_h < 0:
+        # Not enough room above ROI — drop to a single compact line
+        # drawn where v1.11 drew it.
+        cv2.putText(
+            img, lines[0], (x, max(9, y_top_of_roi - 3)),
+            _FONT, fs, color, th, cv2.LINE_AA,
+        )
+        return
+    # lines are emitted top-to-bottom in the list; draw the LAST element
+    # immediately above the ROI and the FIRST element at the top.
+    for i, text in enumerate(reversed(lines)):
+        baseline_y = start_y - i * (line_h + pad)
+        cv2.putText(img, text, (x, baseline_y), _FONT, fs, color, th, cv2.LINE_AA)
+
+
 def draw_frame_overlay(img, *, tanks, results, tmin, tmax, hot, cold,
                        overlay_cfg, fps_actual, temp_unit="C", upscale=1):
     """Paint ROIs, level lines, min/max markers, temp scale, FPS on a BGR frame.
@@ -115,14 +186,11 @@ def draw_frame_overlay(img, *, tanks, results, tmin, tmax, hot, cold,
                 and overlay_cfg.get("level_line", True)):
                 iy = r["y"] + int(res["interface_row"])
                 cv2.line(out, (r["x"], iy), (r["x"] + r["w"], iy), (0, 0, 255), 1)
-            if overlay_cfg.get("tank_labels", True) and res is not None:
-                lvl = res.get("level_pct")
-                if lvl is None:
-                    label = f"{t['id']} --"
-                else:
-                    label = f"{t['id']} {lvl:.0f}%"
-                cv2.putText(out, label, (r["x"], max(9, r["y"] - 3)),
-                            _FONT, 0.35, color, 1, cv2.LINE_AA)
+            if overlay_cfg.get("tank_labels", True):
+                # v1.12 — render the detail block OUTSIDE the ROI in a
+                # multi-line stack so the thermal image stays clean.
+                lines = _tank_label_lines(t, res)
+                _draw_tank_label_stack(out, r["x"], r["y"], lines, color)
 
     # Centre crosshair
     if overlay_cfg.get("center_crosshair"):

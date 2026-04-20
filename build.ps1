@@ -10,7 +10,7 @@
 #   powershell .\build.ps1 -Tag v0.2.0 -Release JuanM2209/thermal-tank-poc
 # =====================================================================
 param(
-    [string]$Tag = "v0.8.0",
+    [string]$Tag = "v0.9.0",
     [string]$ImageName = "thermal-analyzer",
     [string]$Release = ""
 )

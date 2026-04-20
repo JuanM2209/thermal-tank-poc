@@ -57,24 +57,37 @@ v1.11 Otsu contrast-first level detector:
     gradient noise produced *some* argmax and the tank reported a bogus
     level (typically 100 %).
 
-    v1.11 replaces the primary level estimate with a 2-class pixel
-    classifier:
-      1. Run Otsu's method over every ROI pixel → threshold T* and the
-         normalized between-class variance η ∈ [0, 1]. η ≈ 1 means the
-         histogram is cleanly bimodal (real interface). η < 0.3 means the
-         ROI is effectively uniform (no interface, or all the same class).
-      2. Hard uniform gates: `(T_max − T_min) < 2 °C` OR `std < 0.5 °C`
-         OR `η < 0.3` → `reliability="uniform"`, `level_pct = null`.
-         The UI renders "--" so the operator sees the system is *telling
-         it can't tell*, rather than a lie.
-      3. Auto-detect liquid polarity: whichever class dominates the
-         bottom 20 % of rows is taken as "liquid" (matches tank physics
-         whether oil is warm or cold). The per-tank `liquid_is_cold`
-         config can pin the polarity when needed.
-      4. `level_pct = 100 × liquid_pixel_fraction` — the fraction of ROI
-         pixels classified as liquid. Robust against bottle-in-middle
-         and hand-in-ROI scenarios because it reads object area rather
-         than a single horizontal edge.
+    v1.11 replaced the primary level estimate with a 2-class pixel
+    classifier + three uniform gates.
+
+v1.12 Physics-correct height + temporal smoothing (v0.9.0 release):
+    Field testing of v1.11 surfaced three failure modes of the pixel-area
+    estimator:
+      • A 5 %-area warm bottle mid-ROI produced a 35 % reading because
+        ``level_pct = 100 × liquid_pixel_fraction`` counts area, not height.
+      • The reading jittered ±3 % between frames on a static scene because
+        per-frame Otsu picks a new threshold bin each time.
+      • An object in the middle of the ROI was indistinguishable from a
+        partially-filled tank — both give the same liquid fraction.
+
+    v1.12 fixes all three by imposing the physics of a liquid column:
+      1. Row-majority interface row — the top-most ROI row whose
+         liquid-pixel fraction crosses 0.5. ``level_pct`` is now the
+         fraction of rows *below* that row, i.e. true column height, not
+         pixel area. A 5 %-area bottle in the middle now reads as empty
+         unless the bottle rows themselves are majority-liquid AND the
+         rows below them are too.
+      2. EMA-smoothed Otsu threshold T* (α = 0.15). The per-frame Otsu
+         split is noisy — we blend it 15 % / 85 % with the prior frame so
+         frame-to-frame jitter is < 0.5 % in a static scene while the
+         reading still responds to a genuine level change within ~0.5 s.
+      3. Monotonicity gate. A real liquid column has more liquid below
+         the interface than above it. We compute
+         ``monotonicity = below_rows_mean − above_rows_mean`` and refuse
+         the reading (``reliability="uniform"``, reason
+         ``low_monotonicity``) when it falls below 0.35 — this is the
+         signature of an object suspended in the middle of the ROI with
+         no liquid below it.
 
     The v1.10 gradient peaks are still computed for the `phases[]` band
     list (used for stratified-tank overlays), so real oil/water tanks
@@ -167,6 +180,51 @@ OTSU_BOTTOM_WINDOW_FRAC = 0.2
 # for a typical 5-40 °C scene without being sensitive to noise.
 OTSU_HIST_BINS = 64
 
+# --- v1.12 physics + temporal tuning ------------------------------------
+# EMA α for the per-frame Otsu threshold. 0.15 gives ~170 ms response at
+# 30 fps — fast enough for a genuine level change but kills the 1-bin
+# histogram jitter that v1.11 exhibited on a static scene.
+OTSU_EMA_ALPHA = 0.15
+# Monotonicity score floor. below_rows_mean − above_rows_mean must clear
+# this for the reading to count. A hand / bottle suspended mid-ROI with
+# no liquid below it has a low below-fill → score ≈ 0.35 or less → rejected.
+# A genuine 50 % tank scores ~0.9, a 5 % tank scores ~0.65, so 0.5 is a
+# comfortable floor that catches objects while accepting realistic fills.
+MONOTONICITY_MIN = 0.5
+# Row-interface crossover threshold. Interface row = first row from the
+# top whose smoothed liquid fraction ≥ this value. 0.5 is the natural
+# majority-vote level.
+ROW_INTERFACE_THRESHOLD = 0.5
+# 1-D smoothing kernel length for the per-row liquid fraction before the
+# crossover search. 3 rows is enough to kill isolated noisy rows without
+# shifting a real interface by more than one row.
+ROW_SMOOTH_KERNEL = 3
+
+
+def _smooth_rows(rows: np.ndarray, k: int = ROW_SMOOTH_KERNEL) -> np.ndarray:
+    """Centred moving-average over a 1-D vector with edge preservation."""
+    n = int(rows.size)
+    if n == 0 or k <= 1:
+        return rows.astype(np.float32, copy=True)
+    k = min(k, n)
+    kern = np.ones(k, dtype=np.float32) / float(k)
+    return np.convolve(rows.astype(np.float32), kern, mode="same")
+
+
+def _find_interface_row(liq_rows: np.ndarray) -> int:
+    """Find the top-most row whose smoothed liquid fraction ≥ threshold.
+
+    Returns the row index in [0, n] (n when no row crosses → empty ROI).
+    """
+    n = int(liq_rows.size)
+    if n == 0:
+        return 0
+    above = liq_rows >= ROW_INTERFACE_THRESHOLD
+    idx = np.where(above)[0]
+    if idx.size == 0:
+        return n  # nothing majority-liquid → tank reads empty
+    return int(idx[0])
+
 
 def _otsu_threshold_eta(pixels: np.ndarray) -> tuple[float, float]:
     """Compute an Otsu split on ``pixels`` (1-D flattened temperatures).
@@ -210,29 +268,59 @@ def _otsu_threshold_eta(pixels: np.ndarray) -> tuple[float, float]:
 def _otsu_level(
     strip: np.ndarray,
     liquid_is_cold: bool | None,
+    prev_threshold: float | None = None,
 ) -> dict[str, Any]:
-    """2-class pixel classifier for a single ROI strip.
+    """2-class pixel classifier + row-majority interface detector.
+
+    v1.12 changes from v1.11:
+        • ``level_pct`` is derived from the row-majority interface
+          row (liquid column height), not from the pixel-area fraction.
+        • An EMA is applied to the Otsu threshold when ``prev_threshold``
+          is supplied. This is the dominant jitter-reduction mechanism
+          for a static scene.
+        • ``monotonicity`` is reported so the caller can refuse readings
+          where there is no liquid below the declared interface.
 
     Parameters
     ----------
     strip : 2-D array of °C values (rows top→bottom, cols left→right).
     liquid_is_cold : True forces cold=liquid, False forces warm=liquid,
         None auto-detects from the bottom of the ROI.
+    prev_threshold : previous frame's EMA-smoothed Otsu threshold in °C,
+        or None on the first frame. The returned ``threshold_c`` has the
+        EMA already applied so the caller just feeds it back next frame.
 
     Returns a dict with:
-        threshold_c           : Otsu split temperature
-        eta                   : between-class variance ratio ∈ [0, 1]
-        liquid_is_cold        : resolved polarity (True/False)
-        liquid_is_cold_auto   : whether polarity was auto-detected
-        liquid_fraction       : fraction of ROI pixels classified as liquid
-        liquid_fraction_rows  : per-row liquid fraction (list of h floats)
-        level_pct             : 100 × liquid_fraction
-        level_row             : row index that a bottom-packed liquid
-                                column of this level would reach
+        threshold_c            : EMA-smoothed Otsu split temperature
+        threshold_c_raw        : raw per-frame Otsu split (no EMA)
+        eta                    : between-class variance ratio ∈ [0, 1]
+        liquid_is_cold         : resolved polarity (True/False)
+        liquid_is_cold_auto    : whether polarity was auto-detected
+        liquid_fraction        : fraction of ROI pixels classified liquid
+        liquid_fraction_rows   : smoothed per-row liquid fraction
+        level_row              : row index of the liquid/gas interface
+                                 (top-most row where smoothed liquid
+                                 fraction ≥ 0.5)
+        level_pct              : 100 × (h − level_row) / h
+        monotonicity           : below_rows.mean − above_rows.mean. A
+                                 genuine liquid column has this ≥ ~0.5;
+                                 an object in the middle has it ≤ 0.
     """
     h, w = strip.shape
     flat = strip.astype(np.float32).ravel()
-    threshold, eta = _otsu_threshold_eta(flat)
+    threshold_raw, eta = _otsu_threshold_eta(flat)
+
+    # --- EMA smoothing of the threshold (kills per-frame bin jitter) -
+    # We only blend when the raw threshold has not drifted by a huge
+    # amount from the prior — if it has, the scene genuinely changed and
+    # we want to snap. 10 °C is far larger than thermal noise and far
+    # smaller than a realistic scene-swap, so it is the clean threshold.
+    if prev_threshold is None or abs(threshold_raw - prev_threshold) > 10.0:
+        threshold = float(threshold_raw)
+    else:
+        threshold = float(
+            OTSU_EMA_ALPHA * threshold_raw + (1.0 - OTSU_EMA_ALPHA) * prev_threshold
+        )
 
     # --- auto-detect polarity from bottom rows -----------------------
     auto_bool = False
@@ -248,22 +336,41 @@ def _otsu_level(
         mask = strip > threshold
 
     liquid_fraction = float(mask.mean()) if mask.size else 0.0
-    liquid_rows = mask.mean(axis=1).astype(np.float32)
-    level_pct = 100.0 * liquid_fraction
-    # Bottom-packed equivalent: how many rows of liquid would stack up from
-    # the bottom of the ROI at this fraction. Purely for the drawn level line.
-    filled_rows = int(round(h * liquid_fraction))
-    level_row = max(0, min(h - 1, h - filled_rows)) if h > 0 else 0
+    liquid_rows_raw = mask.mean(axis=1).astype(np.float32)
+    liquid_rows = _smooth_rows(liquid_rows_raw)
+
+    # --- row-majority interface row + height-based level -------------
+    level_row = _find_interface_row(liquid_rows)
+    level_pct = 100.0 * max(0, (h - level_row)) / max(1, h)
+
+    # --- monotonicity score -------------------------------------------
+    # Compare liquid density below the declared interface to liquid
+    # density above it. A real tank has below ≫ above; a bottle/hand
+    # suspended in the middle has below ≈ 0 and above > 0.
+    if 0 < level_row < h:
+        below_mean = float(liquid_rows[level_row:].mean())
+        above_mean = float(liquid_rows[:level_row].mean())
+        monotonicity = below_mean - above_mean
+    elif level_row <= 0:
+        # Interface at row 0 → ROI is entirely liquid. Trivially monotonic.
+        monotonicity = float(liquid_rows.mean()) if liquid_rows.size else 1.0
+    else:
+        # Interface below bottom row → ROI is entirely gas. Also monotonic
+        # (nothing above, nothing below) — pass the gate with the
+        # "empty" reading.
+        monotonicity = 1.0
 
     return {
         "threshold_c": float(threshold),
+        "threshold_c_raw": float(threshold_raw),
         "eta": float(eta),
         "liquid_is_cold": bool(liquid_is_cold),
         "liquid_is_cold_auto": bool(auto_bool),
         "liquid_fraction": float(liquid_fraction),
         "liquid_fraction_rows": liquid_rows,
         "level_pct": float(level_pct),
-        "level_row": int(level_row),
+        "level_row": int(max(0, min(h, level_row))),
+        "monotonicity": float(monotonicity),
     }
 
 
@@ -300,6 +407,10 @@ class TankAnalyzer:
         self._rate: dict[str, RateEstimator] = {
             t["id"]: RateEstimator() for t in tanks_config
         }
+        # v1.12: EMA-smoothed Otsu threshold, per tank. Keys are tank IDs;
+        # values are the last smoothed threshold in °C. Absent keys mean
+        # the tank has not been analysed yet (first frame uses raw Otsu).
+        self._otsu_threshold: dict[str, float] = {}
 
     # ----- internal helpers ------------------------------------------------
     def _profile(self, strip: np.ndarray) -> np.ndarray:
@@ -571,17 +682,26 @@ class TankAnalyzer:
             peak_val = float(grad[peak_idx_grad])
             phases = self._build_phases(profile, peaks)
 
-            # --- v1.11 Otsu 2-class pixel classifier (primary level) ----
+            # --- v1.12 Otsu + row-majority classifier (primary level) --
             # Default polarity is auto — the config can pin it per tank
             # with `liquid_is_cold: true|false` when the operator knows.
             polarity_cfg = t.get("liquid_is_cold")
             polarity_override = (
                 bool(polarity_cfg) if isinstance(polarity_cfg, bool) else None
             )
-            otsu = _otsu_level(strip, polarity_override)
+            prev_threshold = self._otsu_threshold.get(t["id"])
+            otsu = _otsu_level(strip, polarity_override, prev_threshold)
+            # Persist the EMA-smoothed threshold for the next frame so
+            # jitter keeps dropping over time.
+            self._otsu_threshold[t["id"]] = float(otsu["threshold_c"])
             otsu_eta = float(otsu["eta"])
+            otsu_monotonicity = float(otsu["monotonicity"])
 
-            # --- Three uniform gates (any failure => no level reported) -
+            # --- v1.12 uniform gates (any failure => no level reported) -
+            # 1. low_contrast    — ROI temp span too small for a real interface
+            # 2. low_stddev      — single hot pixel pretending to be contrast
+            # 3. weak_bimodality — histogram effectively unimodal (η below floor)
+            # 4. low_monotonicity— liquid not piled at the bottom (object in ROI)
             uniform_reasons: list[str] = []
             if strip_span < OTSU_CONTRAST_MIN_C:
                 uniform_reasons.append("low_contrast")
@@ -589,14 +709,16 @@ class TankAnalyzer:
                 uniform_reasons.append("low_stddev")
             if otsu_eta < OTSU_ETA_MIN:
                 uniform_reasons.append("weak_bimodality")
+            if otsu_monotonicity < MONOTONICITY_MIN:
+                uniform_reasons.append("low_monotonicity")
 
             reliability_reasons: list[str] = []
             level_pct: float | None
             if uniform_reasons:
-                # ROI is effectively uniform — refuse to guess. The UI
-                # renders "--" and the operator can read the temperatures
-                # directly to decide if the tank is full-of-cold-liquid or
-                # truly empty.
+                # ROI is effectively uniform or physics-violating — refuse
+                # to guess. The UI renders "--" and the operator can read
+                # the temperatures directly to decide if the tank is
+                # full-of-cold-liquid or truly empty.
                 reliability = "uniform"
                 reliability_reasons = uniform_reasons
                 level_pct = None
@@ -773,12 +895,17 @@ class TankAnalyzer:
                     "confidence": confidence,
                     "reliability": reliability,
                     "reliability_reasons": reliability_reasons,
-                    # v1.11 Otsu fields ------------------------------------
+                    # v1.12 Otsu + physics fields --------------------------
                     # `eta` is the normalized between-class variance (0..1).
                     # The UI uses it as a "confidence" number — > 0.6 is a
                     # clean interface, 0.3..0.6 is marginal, below = uniform.
+                    # `monotonicity` is below_rows_mean − above_rows_mean of
+                    # the per-row liquid fraction; a genuine column has
+                    # this ≫ 0, an object in the middle has it ≤ 0.
                     "eta": round(otsu_eta, 3),
+                    "monotonicity": round(otsu_monotonicity, 3),
                     "otsu_threshold_c": round(float(otsu["threshold_c"]), 2),
+                    "otsu_threshold_c_raw": round(float(otsu["threshold_c_raw"]), 2),
                     "liquid_fraction": round(float(otsu["liquid_fraction"]), 3),
                     "liquid_is_cold": bool(otsu["liquid_is_cold"]),
                     "liquid_is_cold_auto": bool(otsu["liquid_is_cold_auto"]),
@@ -825,14 +952,19 @@ class TankAnalyzer:
         peak_val = float(grad[peak_idx_grad])
         phases = self._build_phases(profile, peaks)
 
-        # v1.11 Otsu — the primary level signal. Mirrors analyze() so the
-        # Why modal shows exactly the same reasoning the live card used.
+        # v1.12 Otsu + row-majority — the primary level signal. Mirrors
+        # analyze() so the Why modal shows exactly the same reasoning the
+        # live card used. We deliberately do NOT mutate the EMA state
+        # here: the Why modal is a read-only peek and should never bias
+        # the temporal smoother that analyze() owns.
         polarity_cfg = t.get("liquid_is_cold")
         polarity_override = (
             bool(polarity_cfg) if isinstance(polarity_cfg, bool) else None
         )
-        otsu = _otsu_level(strip, polarity_override)
+        prev_threshold = self._otsu_threshold.get(t["id"])
+        otsu = _otsu_level(strip, polarity_override, prev_threshold)
         otsu_eta = float(otsu["eta"])
+        otsu_monotonicity = float(otsu["monotonicity"])
 
         uniform_reasons: list[str] = []
         if strip_span < OTSU_CONTRAST_MIN_C:
@@ -841,6 +973,8 @@ class TankAnalyzer:
             uniform_reasons.append("low_stddev")
         if otsu_eta < OTSU_ETA_MIN:
             uniform_reasons.append("weak_bimodality")
+        if otsu_monotonicity < MONOTONICITY_MIN:
+            uniform_reasons.append("low_monotonicity")
         reliability = "uniform" if uniform_reasons else "ok"
 
         peak_idx = int(otsu["level_row"])
@@ -861,7 +995,9 @@ class TankAnalyzer:
             "strip_span": round(strip_span, 3),
             "strip_std": round(strip_std, 3),
             "eta": round(otsu_eta, 3),
+            "monotonicity": round(otsu_monotonicity, 3),
             "otsu_threshold_c": round(float(otsu["threshold_c"]), 2),
+            "otsu_threshold_c_raw": round(float(otsu["threshold_c_raw"]), 2),
             "liquid_fraction": round(float(otsu["liquid_fraction"]), 3),
             "liquid_fraction_rows": [
                 round(float(v), 3) for v in otsu["liquid_fraction_rows"]
