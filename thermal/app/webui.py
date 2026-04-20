@@ -122,7 +122,11 @@ INDEX_HTML = r"""<!doctype html>
     .tank-temps .c .v{font-size:.85rem;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:#e2e8f0}
     .tank-temps .c.min .v{color:#38bdf8}
     .tank-temps .c.max .v{color:#fb923c}
-    .tank-actions{margin-top:10px;display:flex;gap:6px;padding-top:10px;border-top:1px solid #1f2a38}
+    /* v0.9.2: tank-actions relocated to the TOP of each tank card (right
+       under .tank-head) so Inspect / Why? / Edit / Remove are ALWAYS
+       visible — no scrolling past stats + sparkline + geometry fold. */
+    .tank-actions{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+    .tank-actions .btn.sm{padding:3px 8px;font-size:11px;line-height:1.15}
 
     /* measurement tools */
     .tool-bar{position:absolute;top:8px;left:8px;z-index:20;display:flex;gap:4px;background:rgba(5,7,10,.85);border:1px solid #1f2630;padding:4px;border-radius:10px;backdrop-filter:blur(6px)}
@@ -448,6 +452,23 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
 
+        <!-- v0.9.2: action row moved here from the bottom of the card so
+             Inspect / Why? / Edit / Remove are always visible, regardless
+             of card expansion state or how many tanks are present. Works
+             for 1 tank, 2 tanks, or N tanks. -->
+        <div class="tank-actions">
+          <button class="btn sm inspect"
+                  :class="inspector.tankId===t.id?'active':''"
+                  @click="toggleInspector(t.id)"
+                  title="Highlight perimeter + level line on live feed">
+            <span x-show="inspector.tankId!==t.id">Inspect</span>
+            <span x-show="inspector.tankId===t.id">Hide</span>
+          </button>
+          <button class="btn sm why" @click="openWhy(t.id)" title="Why is the detector reporting this level?">Why?</button>
+          <button class="btn sm" @click="editTank(t)">Edit</button>
+          <button class="btn sm" @click="removeTank(t.id)">Remove</button>
+        </div>
+
         <div class="tank-body">
           <!-- vertical fill bar -->
           <div class="fill-col">
@@ -522,18 +543,8 @@ INDEX_HTML = r"""<!doctype html>
           <div class="k mt-1" x-text="'roi x=' + t.roi?.x + ' y=' + t.roi?.y + ' w=' + t.roi?.w + ' h=' + t.roi?.h"></div>
         </details>
 
-        <div class="tank-actions">
-          <button class="btn sm inspect"
-                  :class="inspector.tankId===t.id?'active':''"
-                  @click="toggleInspector(t.id)"
-                  title="Highlight perimeter + level line on live feed">
-            <span x-show="inspector.tankId!==t.id">Inspect</span>
-            <span x-show="inspector.tankId===t.id">Hide</span>
-          </button>
-          <button class="btn sm why" @click="openWhy(t.id)" title="Why is the detector reporting this level?">Why?</button>
-          <button class="btn sm" @click="editTank(t)">Edit</button>
-          <button class="btn sm" @click="removeTank(t.id)">Remove</button>
-        </div>
+        <!-- v0.9.2: .tank-actions relocated to the TOP of the card (right
+             after .tank-head). Nothing renders here now. -->
       </div>
     </template>
     <template x-if="!state.results?.length">
@@ -582,7 +593,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.13</span>
+    <span>Operator Console v1.14</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -845,7 +856,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.13 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.14 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
