@@ -423,7 +423,10 @@ INDEX_HTML = r"""<!doctype html>
   </section>
 
   <!-- RIGHT: SCADA tank cards -->
-  <aside class="flex flex-col gap-3 min-h-0 overflow-y-auto pr-1">
+  <!-- v0.9.1: pb-96 reserves ~380 px of scroll room past the end of the
+       last card so the Hide/Why/Edit/Remove row is never covered by the
+       fixed "Alerts & Events" panel (bottom-right, max 320 px tall). -->
+  <aside class="flex flex-col gap-3 min-h-0 overflow-y-auto pr-1 pb-96">
     <template x-for="t in state.results" :key="t.id">
       <div class="tank-card" :class="tankCardClass(t)">
         <div class="tank-head">
@@ -579,7 +582,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.12</span>
+    <span>Operator Console v1.13</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -842,7 +845,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.12 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.13 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -2012,12 +2015,19 @@ function app(){
       return `left:${left}px;top:${y}px;width:${width}px`;
     },
     inspectorCloseStyle(){
+      // v0.9.1: CLOSE button now anchors to the top-right of the canvas
+      // viewport instead of the ROI top-right. The old ROI-relative
+      // positioning collided with the v1.12 LEVEL/FT/BBL label stack
+      // whenever the ROI was narrow (right_edge - 55 could fall to the
+      // LEFT of the left edge on narrow ROIs like ~35 px wide). Fixed
+      // viewport anchor keeps CLOSE out of the way of everything the
+      // inspector draws.
       const t = this.inspectedTank();
       const g = this._inspectorImgRect();
-      if (!t || !g || !t.roi) return 'display:none';
-      const x = g.offX + (t.roi.x + t.roi.w) * g.sx - 55;
-      const y = g.offY + t.roi.y * g.sy - 24;
-      return `left:${x}px;top:${Math.max(4, y)}px`;
+      if (!t || !g) return 'display:none';
+      const x = g.offX + g.w - 64;  // 8px padding from right edge of image
+      const y = g.offY + 8;          // 8px down from top edge of image
+      return `left:${x}px;top:${y}px`;
     },
 
     // -------------------- v1.7: Sparkline --------------------
