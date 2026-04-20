@@ -40,12 +40,21 @@ INDEX_HTML = r"""<!doctype html>
     .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
     .dot.ok{background:#22c55e}.dot.warn{background:#f59e0b}.dot.err{background:#ef4444}.dot.idle{background:#64748b}
 
-    /* SCADA tank card */
-    .tank-card{background:linear-gradient(180deg,#0d1218 0%,#0a0e14 100%);border:1px solid #1f2a38;border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}
+    /* SCADA tank card
+       v0.10.0: flex:none so cards take their natural height inside the
+       flex-col aside — the aside now scrolls instead of the cards
+       getting compressed. overflow:visible so nothing inside the card
+       ever gets clipped (old overflow:hidden was hiding Fill Rate /
+       ETA / Min-Avg-Max / geometry when 2+ tanks were present).
+       .tank-card.inspected gives a subtle cyan glow when the card's
+       Inspect toggle is on — multiple cards can be inspected at once. */
+    .tank-card{background:linear-gradient(180deg,#0d1218 0%,#0a0e14 100%);border:1px solid #1f2a38;border-radius:14px;padding:14px 16px;position:relative;overflow:visible;flex:none}
     .tank-card.water{border-color:#164e63}
     .tank-card.oil{border-color:#7c2d12}
     .tank-card.warning{border-color:#92400e;box-shadow:0 0 0 1px #b45309 inset}
     .tank-card.alert{border-color:#991b1b;box-shadow:0 0 0 1px #b91c1c inset, 0 0 12px rgba(220,38,38,.18)}
+    .tank-card.inspected{border-color:#38bdf8;box-shadow:0 0 0 1px #0ea5e9 inset, 0 0 18px rgba(56,189,248,.22)}
+    .tank-card.inspected.alert{box-shadow:0 0 0 1px #b91c1c inset, 0 0 0 2px rgba(56,189,248,.45) inset, 0 0 20px rgba(56,189,248,.28)}
     .tank-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
     .tank-id{font-size:.7rem;letter-spacing:.16em;font-family:ui-monospace,SFMono-Regular,monospace;color:#64748b;text-transform:uppercase}
     .tank-id b{color:#e2e8f0;font-weight:600;letter-spacing:.02em}
@@ -383,45 +392,57 @@ INDEX_HTML = r"""<!doctype html>
         </template>
       </div>
 
-      <!-- Tank Inspector overlay (v1.7, v1.12) — click any tank card's
-           "Inspect" button to highlight its perimeter on the live feed
-           with a dashed level line. v1.12 moves the "% · FT · BBL"
+      <!-- Tank Inspector overlay (v1.7, v1.12, v0.10.0) — click any tank
+           card's "Inspect" button to highlight its perimeter on the live
+           feed with a dashed level line. v1.12 moved the "% · FT · BBL"
            detail block OUTSIDE the ROI as a multi-line stack so the
-           thermal image inside the box stays clean. -->
-      <div class="inspector-overlay" x-show="inspector.tankId" x-transition>
-        <template x-if="inspectedTank()">
+           thermal image inside the box stays clean.
+           v0.10.0: multi-tank simultaneous inspection — each tank card's
+           Inspect toggle adds/removes its id from inspector.tankIds and
+           every inspected tank renders its own box + level line + detail
+           stack in the loop below. -->
+      <div class="inspector-overlay" x-show="inspector.tankIds.length" x-transition>
+        <template x-for="t in inspectedTanks()" :key="t.id">
           <div>
-            <div class="inspector-box" :class="inspectorBoxCls()" :style="inspectorBoxStyle()"></div>
+            <div class="inspector-box" :class="inspectorBoxCls(t)" :style="inspectorBoxStyle(t)"></div>
             <!-- v1.12 detail stack: primary line shows LEVEL/UNIFORM/UNCERTAIN;
                  supplementary lines show FT and BBL when geometry is defined. -->
-            <div class="inspector-detail" :class="inspectorDetailCls()" :style="inspectorDetailStyle()">
-              <template x-for="(txt, i) in inspectorDetailLines()" :key="i">
+            <div class="inspector-detail" :class="inspectorDetailCls(t)" :style="inspectorDetailStyle(t)">
+              <template x-for="(txt, i) in inspectorDetailLines(t)" :key="i">
                 <div class="line" :class="i===0?'primary':'sub'" x-text="txt"></div>
               </template>
             </div>
             <!-- primary level line — dashed horizontal, NO big centered tag
                  in v1.12 (detail lives above the ROI now). -->
-            <div class="inspector-line" :class="inspectorLineCls()" :style="inspectorLineStyle('primary')"></div>
+            <div class="inspector-line" :class="inspectorLineCls(t)" :style="inspectorLineStyle(t, 'primary')"></div>
             <!-- secondary layer (sludge) when multi_layer on -->
-            <template x-if="inspectorHasSecondary()">
-              <div class="inspector-line secondary" :style="inspectorLineStyle('secondary')">
-                <span class="tag" x-text="inspectorSecondaryLabel()"></span>
+            <template x-if="inspectorHasSecondary(t)">
+              <div class="inspector-line secondary" :style="inspectorLineStyle(t, 'secondary')">
+                <span class="tag" x-text="inspectorSecondaryLabel(t)"></span>
               </div>
             </template>
             <!-- HI / LO alarm guides -->
-            <template x-if="inspectorAlarmPct('hi') != null">
-              <div class="inspector-alarm-line" :style="inspectorAlarmLineStyle('hi')">
-                <span class="tag" x-text="'HI ' + inspectorAlarmPct('hi').toFixed(0) + '%'"></span>
+            <template x-if="inspectorAlarmPct(t, 'hi') != null">
+              <div class="inspector-alarm-line" :style="inspectorAlarmLineStyle(t, 'hi')">
+                <span class="tag" x-text="'HI ' + inspectorAlarmPct(t, 'hi').toFixed(0) + '%'"></span>
               </div>
             </template>
-            <template x-if="inspectorAlarmPct('lo') != null">
-              <div class="inspector-alarm-line lo" :style="inspectorAlarmLineStyle('lo')">
-                <span class="tag" x-text="'LO ' + inspectorAlarmPct('lo').toFixed(0) + '%'"></span>
+            <template x-if="inspectorAlarmPct(t, 'lo') != null">
+              <div class="inspector-alarm-line lo" :style="inspectorAlarmLineStyle(t, 'lo')">
+                <span class="tag" x-text="'LO ' + inspectorAlarmPct(t, 'lo').toFixed(0) + '%'"></span>
               </div>
             </template>
-            <button class="inspector-close" :style="inspectorCloseStyle()" @click="closeInspector()">CLOSE</button>
           </div>
         </template>
+        <!-- v0.10.0: single "Hide all" pill in top-right when any tanks are
+             inspected. Each tank also has its own Hide button on its card,
+             so per-tank CLOSE buttons on the overlay are redundant + would
+             collide when ROIs overlap. -->
+        <button class="inspector-close"
+                x-show="inspector.tankIds.length"
+                :style="inspectorCloseAllStyle()"
+                @click="closeInspector()"
+                x-text="inspector.tankIds.length === 1 ? 'CLOSE' : 'HIDE ALL ('+inspector.tankIds.length+')'"></button>
       </div>
     </div>
   </section>
@@ -432,7 +453,7 @@ INDEX_HTML = r"""<!doctype html>
        fixed "Alerts & Events" panel (bottom-right, max 320 px tall). -->
   <aside class="flex flex-col gap-3 min-h-0 overflow-y-auto pr-1 pb-96">
     <template x-for="t in state.results" :key="t.id">
-      <div class="tank-card" :class="tankCardClass(t)">
+      <div class="tank-card" :class="[tankCardClass(t), inspector.tankIds.includes(t.id) ? 'inspected' : '']">
         <div class="tank-head">
           <div class="tank-id"><b x-text="t.id.toUpperCase().replace('_','-')"></b></div>
           <div class="flex items-center gap-2">
@@ -455,14 +476,16 @@ INDEX_HTML = r"""<!doctype html>
         <!-- v0.9.2: action row moved here from the bottom of the card so
              Inspect / Why? / Edit / Remove are always visible, regardless
              of card expansion state or how many tanks are present. Works
-             for 1 tank, 2 tanks, or N tanks. -->
+             for 1 tank, 2 tanks, or N tanks.
+             v0.10.0: Inspect is a multi-select toggle — click on multiple
+             tanks to overlay them all on the live feed simultaneously. -->
         <div class="tank-actions">
           <button class="btn sm inspect"
-                  :class="inspector.tankId===t.id?'active':''"
+                  :class="inspector.tankIds.includes(t.id) ? 'active' : ''"
                   @click="toggleInspector(t.id)"
-                  title="Highlight perimeter + level line on live feed">
-            <span x-show="inspector.tankId!==t.id">Inspect</span>
-            <span x-show="inspector.tankId===t.id">Hide</span>
+                  title="Highlight perimeter + level line on live feed (multi-select)">
+            <span x-show="!inspector.tankIds.includes(t.id)">Inspect</span>
+            <span x-show="inspector.tankIds.includes(t.id)">Hide</span>
           </button>
           <button class="btn sm why" @click="openWhy(t.id)" title="Why is the detector reporting this level?">Why?</button>
           <button class="btn sm" @click="editTank(t)">Edit</button>
@@ -593,7 +616,7 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Bottom controls -->
 <footer class="border-t border-[#1f2630] bg-[#07090d]/90 backdrop-blur px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between">
   <div class="flex items-center gap-3">
-    <span>Operator Console v1.14</span>
+    <span>Operator Console v1.15</span>
     <span class="k" x-show="config?.calibration?.calibrated_at" x-text="'calibrated ' + config?.calibration?.calibrated_at"></span>
   </div>
   <div class="flex items-center gap-3">
@@ -856,7 +879,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <!-- About -->
     <section class="text-[10px] text-slate-500 pt-2 border-t border-[#1f2630]">
-      Operator Console v1.14 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
+      Operator Console v1.15 &middot; stream <span x-text="fpsLabel"></span> &middot; sensor
       <span x-text="state.w+'x'+state.h"></span>
     </section>
   </div>
@@ -1097,7 +1120,10 @@ function app(){
     alerts: { collapsed:false, items:[], since:0 },
 
     // v1.7 — Tank Inspector overlay + sparkline + Why modal + rotate hint
-    inspector: { tankId: null },
+    // v0.10.0 — inspector is now multi-select: tankIds is an Alpine-reactive
+    // array of tank ids currently being rendered on the live feed. Each
+    // inspected tank gets its own box / level line / detail stack.
+    inspector: { tankIds: [] },
     sparkBuffers: {},              // { [tankId]: number[] }  rolling ~60 samples
     sparkCap: 60,                   // ~30 min at 30s per sample — tick() pushes every call
     sparkTickEvery: 3,              // push sample every Nth tick (~4.5s) to stretch to ~30 min
@@ -1871,17 +1897,34 @@ function app(){
       }
     },
 
-    // -------------------- v1.7: Inspector overlay --------------------
-    // Resolve the tank object currently targeted by the Inspector.
+    // -------------------- v1.7 / v0.10.0: Inspector overlay --------------------
+    // v0.10.0: the inspector is multi-select. inspector.tankIds is a
+    // reactive array of tank ids. Every helper takes the tank as an arg
+    // so the x-for template in index.html can render one set of overlays
+    // per inspected tank without sharing state between iterations.
+    //
+    // Backward-compat: inspectedTank() (singular) still returns the
+    // first inspected tank — used by any older JS paths / debug hooks.
+    inspectedTanks(){
+      const ids = this.inspector.tankIds || [];
+      if (!ids.length) return [];
+      const results = this.state.results || [];
+      // Preserve the order the user clicked them in.
+      return ids.map(id => results.find(t => t.id === id)).filter(Boolean);
+    },
     inspectedTank(){
-      const id = this.inspector.tankId;
-      if (!id) return null;
-      return (this.state.results || []).find(t => t.id === id) || null;
+      return this.inspectedTanks()[0] || null;
+    },
+    isInspected(id){
+      return (this.inspector.tankIds || []).includes(id);
     },
     toggleInspector(id){
-      this.inspector.tankId = (this.inspector.tankId === id) ? null : id;
+      const arr = this.inspector.tankIds || [];
+      const i = arr.indexOf(id);
+      if (i === -1) this.inspector.tankIds = [...arr, id];
+      else          this.inspector.tankIds = arr.filter(x => x !== id);
     },
-    closeInspector(){ this.inspector.tankId = null; },
+    closeInspector(){ this.inspector.tankIds = []; },
     // Project sensor-space ROI/rows onto the rendered <img> tag — gives us
     // the same scaling the measurement canvas uses. Returns null when the
     // image isn't laid out yet (first frame).
@@ -1899,8 +1942,7 @@ function app(){
         sx: r.width / sw, sy: r.height / sh,
       };
     },
-    inspectorBoxStyle(){
-      const t = this.inspectedTank();
+    inspectorBoxStyle(t){
       const g = this._inspectorImgRect();
       if (!t || !g || !t.roi) return 'display:none';
       const x = g.offX + t.roi.x * g.sx;
@@ -1909,18 +1951,15 @@ function app(){
       const h = t.roi.h * g.sy;
       return `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
     },
-    inspectorBoxCls(){
-      const t = this.inspectedTank();
+    inspectorBoxCls(t){
       if (!t) return '';
       if (t.reliability === 'uncertain') return 'uncertain';
       return (t.alarms?.hi || t.alarms?.lo) ? 'alert' : '';
     },
-    inspectorLineCls(){
-      const t = this.inspectedTank();
+    inspectorLineCls(t){
       return t?.reliability === 'uncertain' ? 'uncertain' : '';
     },
-    inspectorLineStyle(layer){
-      const t = this.inspectedTank();
+    inspectorLineStyle(t, layer){
       const g = this._inspectorImgRect();
       if (!t || !g) return 'display:none';
       let rowSensor = t.interface_row_sensor;
@@ -1935,11 +1974,10 @@ function app(){
       const width = (t.roi?.w || 0) * g.sx;
       return `left:${left}px;top:${y}px;width:${width}px`;
     },
-    inspectorPrimaryLabel(){
+    inspectorPrimaryLabel(t){
       // Kept for backward compatibility — v1.12 uses inspectorDetailLines()
       // for the new stacked label above the ROI. This function is still
       // called by older builds / debug paths.
-      const t = this.inspectedTank();
       if (!t) return '';
       if (t.reliability === 'uniform')   return 'UNIFORM';
       if (t.reliability === 'uncertain') return 'UNCERTAIN';
@@ -1949,29 +1987,28 @@ function app(){
     // v1.12 — multi-line detail stack rendered ABOVE the ROI.
     // Returns an array of strings, top-to-bottom. First element is the
     // primary (gets highlighted background), rest are supplementary.
-    inspectorDetailLines(){
-      const t = this.inspectedTank();
+    // v0.10.0: takes tank as arg for multi-tank rendering.
+    inspectorDetailLines(t){
       if (!t) return [];
-      if (t.reliability === 'uniform')   return [t.name + ' \u2014 UNIFORM'];
-      if (t.reliability === 'uncertain') return [t.name + ' \u2014 UNCERTAIN'];
+      const name = (t.name || t.id || '').toString();
+      if (t.reliability === 'uniform')   return [name + ' \u2014 UNIFORM'];
+      if (t.reliability === 'uncertain') return [name + ' \u2014 UNCERTAIN'];
       const pct = t.level_pct != null ? t.level_pct.toFixed(1) : '--';
-      const lines = ['LEVEL ' + pct + '%'];
+      const lines = [name.toUpperCase() + ' \u2014 ' + pct + '%'];
       const ft = t.reading?.level_ft;
       const bbl = t.reading?.volume_bbl;
       if (ft != null)  lines.push(ft.toFixed(2) + ' FT');
       if (bbl != null) lines.push(Math.round(bbl).toLocaleString() + ' BBL');
       return lines;
     },
-    inspectorDetailCls(){
-      const t = this.inspectedTank();
+    inspectorDetailCls(t){
       if (!t) return '';
       if (t.reliability === 'uniform')   return 'uniform';
       if (t.reliability === 'uncertain') return 'uncertain';
       if (t.alarms?.hi || t.alarms?.lo)  return 'alert';
       return '';
     },
-    inspectorDetailStyle(){
-      const t = this.inspectedTank();
+    inspectorDetailStyle(t){
       const g = this._inspectorImgRect();
       if (!t || !g || !t.roi) return 'display:none';
       // Anchor the detail stack at the top-LEFT corner of the ROI,
@@ -1981,40 +2018,31 @@ function app(){
       // are present (LEVEL-only, LEVEL+FT, or LEVEL+FT+BBL).
       const x = g.offX + t.roi.x * g.sx;
       const topOfRoi = g.offY + t.roi.y * g.sy;
-      // Container positioning: bottom = distance from canvas top of the
-      // ROI top edge, minus a small padding. Expressed as a top value by
-      // subtracting an upper-bound stack height (≈70 px for 3 lines).
-      // Flex align-items:flex-end + justify-content:flex-end would be
-      // cleaner, but we keep absolute top anchoring to avoid relayout.
       const padding = 6;
       // Render stack with `transform: translateY(-100%)` so its bottom
       // aligns with the anchor y. Trick: anchor on top of ROI, then
       // shift up by the natural stack height.
       return `left:${x}px;top:${topOfRoi - padding}px;transform:translateY(-100%)`;
     },
-    inspectorHasSecondary(){
-      const t = this.inspectedTank();
+    inspectorHasSecondary(t){
       return !!(t && Array.isArray(t.layers) && t.layers.length > 1);
     },
-    inspectorSecondaryLabel(){
-      const t = this.inspectedTank();
+    inspectorSecondaryLabel(t){
       if (!t) return '';
       const sec = (t.layers || []).find(l => l.label !== 'primary');
       if (!sec) return '';
       return sec.label.toUpperCase() + ' ' + sec.level_pct.toFixed(1) + '%';
     },
-    inspectorAlarmPct(kind){
-      const t = this.inspectedTank();
+    inspectorAlarmPct(t, kind){
       if (!t || !t.alarms) return null;
       const v = (kind === 'hi') ? t.alarms.hi_pct : t.alarms.lo_pct;
       if (v == null) return null;
       return Number(v);
     },
-    inspectorAlarmLineStyle(kind){
-      const t = this.inspectedTank();
+    inspectorAlarmLineStyle(t, kind){
       const g = this._inspectorImgRect();
       if (!t || !g || !t.roi) return 'display:none';
-      const pct = this.inspectorAlarmPct(kind);
+      const pct = this.inspectorAlarmPct(t, kind);
       if (pct == null) return 'display:none';
       // level_pct is measured from ROI bottom → convert to sensor y.
       const fromBottom = pct / 100;
@@ -2025,20 +2053,17 @@ function app(){
       const width = t.roi.w * g.sx;
       return `left:${left}px;top:${y}px;width:${width}px`;
     },
-    inspectorCloseStyle(){
-      // v0.9.1: CLOSE button now anchors to the top-right of the canvas
-      // viewport instead of the ROI top-right. The old ROI-relative
-      // positioning collided with the v1.12 LEVEL/FT/BBL label stack
-      // whenever the ROI was narrow (right_edge - 55 could fall to the
-      // LEFT of the left edge on narrow ROIs like ~35 px wide). Fixed
-      // viewport anchor keeps CLOSE out of the way of everything the
-      // inspector draws.
-      const t = this.inspectedTank();
+    // v0.10.0: single "HIDE ALL" pill anchored to top-right of the live
+    // feed — replaces per-inspector CLOSE buttons that would collide when
+    // multiple overlapping ROIs are inspected at once.
+    inspectorCloseAllStyle(){
       const g = this._inspectorImgRect();
-      if (!t || !g) return 'display:none';
-      const x = g.offX + g.w - 64;  // 8px padding from right edge of image
-      const y = g.offY + 8;          // 8px down from top edge of image
-      return `left:${x}px;top:${y}px`;
+      if (!g) return 'display:none';
+      const count = (this.inspector.tankIds || []).length;
+      const width = count > 1 ? 120 : 64;
+      const x = g.offX + g.w - width - 8;
+      const y = g.offY + 8;
+      return `left:${x}px;top:${y}px;min-width:${width}px`;
     },
 
     // -------------------- v1.7: Sparkline --------------------
