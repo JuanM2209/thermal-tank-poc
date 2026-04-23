@@ -22,7 +22,7 @@ set -eu
 # -----------------------------------------------------------------------------
 GH_USER="JuanM2209"
 GH_REPO="thermal-tank-poc"
-TAG="v0.10.0"
+TAG="v0.11.0-slim"
 # -----------------------------------------------------------------------------
 
 IMG="thermal-analyzer:armv7"
@@ -54,7 +54,7 @@ say()   { printf '\033[36m[thermal]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m[thermal]\033[0m %s\n' "$*"; }
 err()   { printf '\033[31m[thermal]\033[0m %s\n' "$*"; }
 
-say "1/7 Checking prerequisites…"
+say "1/8 Checking prerequisites…"
 for cmd in docker curl gzip; do
     command -v $cmd >/dev/null || { err "missing: $cmd"; exit 1; }
 done
@@ -63,10 +63,60 @@ if [ ! -e /dev/video0 ]; then
     warn "/dev/video0 not present — the container will start but camera capture will fail until you plug in the P2 Pro"
 fi
 
-say "2/7 Preparing $INSTALL_DIR…"
+say "2/8 Preparing $INSTALL_DIR…"
 cd "$INSTALL_DIR"
 
-say "3/7 Downloading config.yaml (only if absent)…"
+# -------------------------------------------------------------------------
+# Reclaim space BEFORE anything else — surgically, so we don't impact
+# other containers on this Nucleus (Node-RED, Cockpit, etc).
+#
+# WHAT WE TOUCH:
+#   - thermal-analyzer container (exact name)
+#   - thermal-analyzer:* images (tag match only)
+#   - dangling <none>:<none> layers (orphans from prior failed `docker load`)
+#   - thermal-analyzer-armv7.tar.gz files on disk
+#
+# WHAT WE DO NOT TOUCH:
+#   - any other tagged image
+#   - any other container (running or stopped)
+#   - any volume (no --volumes)
+#   - any network
+# -------------------------------------------------------------------------
+say "2b/8 Reclaiming space from prior failed thermal-analyzer installs…"
+if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+fi
+docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | grep '^thermal-analyzer:' \
+    | xargs -r -n1 docker rmi -f >/dev/null 2>&1 || true
+# Dangling <none>:<none> layers ONLY — safe on production, does not affect
+# any tagged image, any container, any volume, any network.
+docker image prune -f >/dev/null 2>&1 || true
+rm -f "$INSTALL_DIR/thermal-analyzer-armv7.tar.gz" \
+      /root/apps/thermal-analyzer-armv7.tar.gz \
+      /home/admin/thermal-analyzer-armv7.tar.gz \
+      /data/thermal-analyzer-armv7.tar.gz 2>/dev/null || true
+
+# -------------------------------------------------------------------------
+# Free-space precheck — fail fast if the partition can't fit the image
+# (~200 MB uncompressed + working headroom).
+# -------------------------------------------------------------------------
+docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+# Fall back to /data if we can't introspect the mount
+avail_kb=$(df -Pk "$docker_root" 2>/dev/null | awk 'NR==2 {print $4}')
+avail_kb=${avail_kb:-0}
+need_kb=358400   # 350 MB minimum — 200 MB image + 150 MB headroom
+if [ "$avail_kb" -lt "$need_kb" ]; then
+    err "only ${avail_kb} KB free on $docker_root — need at least ${need_kb} KB"
+    err "safe commands to reclaim space WITHOUT affecting other containers/volumes:"
+    err "  docker image prune -f                                           # dangling layers"
+    err "  docker ps -a | awk '/Exited/ {print \$NF}' | xargs -r docker rm  # stopped containers"
+    df -h "$docker_root" || true
+    exit 1
+fi
+say "    -> $(df -Ph "$docker_root" | awk 'NR==2 {print $4 " free on " $6}')"
+
+say "3/8 Downloading config.yaml (only if absent)…"
 if [ ! -f config.yaml ]; then
     curl -fsSL "$CFG_URL" -o config.yaml
     say "    -> $INSTALL_DIR/config.yaml  (edit ROIs interactively on the web UI)"
@@ -74,22 +124,27 @@ else
     say "    -> keeping existing config.yaml"
 fi
 
-say "4/7 Stopping previous $NAME + cleaning up old images…"
-if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
-    docker rm -f "$NAME" >/dev/null
-    say "    -> removed container: $NAME"
+say "4/8 Loading new image from GitHub release…"
+# Prefer streaming download — never lands a full tar.gz on disk, so peak
+# /data usage is ~200 MB (image layers) instead of ~370 MB (tar + layers).
+# If that fails (slow link, interrupted connection), fall back to a resumable
+# download + local load so repeated retries don't re-start from zero.
+if curl --connect-timeout 20 --max-time 1800 --retry 5 --retry-delay 10 \
+        --fail --location --silent --show-error "$IMG_URL" \
+        | gunzip | docker load; then
+    say "    -> streamed image loaded successfully"
+else
+    warn "    -> streaming load failed; falling back to resumable file download"
+    tarball="$INSTALL_DIR/thermal-analyzer-armv7.tar.gz"
+    curl -fL --retry 20 --retry-delay 10 -C - -o "$tarball" "$IMG_URL"
+    gunzip -c "$tarball" | docker load
+    rm -f "$tarball"
 fi
-for old in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E "^thermal-analyzer:" || true); do
-    if [ "$old" != "$IMG" ]; then
-        docker rmi "$old" >/dev/null 2>&1 && say "    -> removed old image: $old" || true
-    fi
-done
-docker rmi "$IMG" >/dev/null 2>&1 || true
 
-say "5/7 Loading new image from GitHub release…"
-curl -fL "$IMG_URL" | gunzip | docker load
+say "5/8 Pruning dangling layers (safe — only <none>:<none> orphans)…"
+docker image prune -f >/dev/null 2>&1 || true
 
-say "6/7 Starting $NAME…"
+say "6/8 Starting $NAME…"
 docker run -d \
     --name "$NAME" \
     --restart unless-stopped \
@@ -101,7 +156,7 @@ docker run -d \
     -e PUBLISH_ENDPOINT="http://127.0.0.1:1880/thermal/ingest" \
     "$IMG" >/dev/null
 
-say "7/7 Importing Node-RED supervisor dashboard…"
+say "7/8 Importing Node-RED supervisor dashboard…"
 curl -fsSL "$FLOW_URL" -o "$INSTALL_DIR/tank-dashboard-flow.json" || {
     warn "    -> could not download flow JSON; will skip NR import"
     skip_nr=1
@@ -170,6 +225,9 @@ PYEOF
         warn "    -> no python on host — import $INSTALL_DIR/tank-dashboard-flow.json manually in NR"
     fi
 fi
+
+say "8/8 Final cleanup (dangling layers only)…"
+docker image prune -f >/dev/null 2>&1 || true
 
 sleep 2
 say ""

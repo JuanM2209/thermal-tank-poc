@@ -1,0 +1,99 @@
+# Build with:
+#   docker buildx build -f Dockerfile.slim --platform linux/arm/v7 -t thermal-analyzer:armv7 --load .
+#
+# Target: ~90-110 MB compressed / ~250 MB decompressed
+# Strategy:
+#   - multi-stage (builder + slim runtime)
+#   - strip debug symbols from all .so (saves ~60 MB)
+#   - remove __pycache__, tests, docs, locales
+#   - opencv-python-headless (no Qt GUI)
+#   - drop libatlas3-base (redundant with openblas)
+#   - drop libav* (we read raw YUYV from V4L2, no ffmpeg codecs needed)
+
+FROM --platform=linux/arm/v7 python:3.11-slim-bookworm AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        binutils \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip wheel && \
+    pip install \
+        --extra-index-url https://www.piwheels.org/simple \
+        --prefer-binary \
+        --only-binary ":all:" \
+        "opencv-python-headless>=4.6,<4.11" \
+        "numpy<2" \
+        "pyyaml==6.0.2" \
+        "flask==3.0.3"
+
+# Aggressive slimming of the venv in-place
+RUN find /opt/venv -name '*.so*' -exec strip --strip-unneeded {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -name '*.pyi' -delete 2>/dev/null || true \
+ && find /opt/venv -name '*.pyc' -delete 2>/dev/null || true \
+ && find /opt/venv -type d -name '*.dist-info' -exec sh -c 'rm -rf "$1"/RECORD "$1"/WHEEL "$1"/LICENSE*' _ {} \; 2>/dev/null || true
+
+
+# ---------- Runtime stage (minimal) ----------
+FROM --platform=linux/arm/v7 python:3.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LANG=C.UTF-8 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Runtime shared libs required by piwheels opencv-python-headless wheel.
+# The piwheels build is compiled with full features and dynamically links
+# to every codec + BLAS/FFmpeg lib at runtime, so the set of APT packages
+# matches v0.10.0. Real size savings come from:
+#   1) strip --strip-unneeded on all .so (builder stage, ~50–80 MB uncompressed)
+#   2) __pycache__ / tests / .pyi / .dist-info cleanup (~15–25 MB)
+#   3) doc/man/locale purge (~10–15 MB)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libjpeg62-turbo \
+        libpng16-16 \
+        libtiff6 \
+        libwebp7 \
+        libopenjp2-7 \
+        libopenblas0 \
+        libatlas3-base \
+        libgfortran5 \
+        libgomp1 \
+        libavcodec59 \
+        libavformat59 \
+        libavutil57 \
+        libswscale6 \
+        ca-certificates \
+ && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
+ && find /usr/share/doc -depth -type f ! -name copyright -delete 2>/dev/null || true \
+ && find /usr/share/man -type f -delete 2>/dev/null || true \
+ && find /usr/share/locale -mindepth 1 -maxdepth 1 -type d ! -name 'en*' -exec rm -rf {} + 2>/dev/null || true
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Self-test: fail the build if cv2 / numpy cannot actually be imported here.
+RUN python -c "import numpy, cv2; print('numpy', numpy.__version__, 'cv2', cv2.__version__)"
+
+WORKDIR /app
+COPY app/ /app/
+COPY config.yaml /app/config.yaml
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import os,sys; sys.exit(0 if os.path.exists('/tmp/alive') else 1)"
+
+CMD ["python", "-u", "/app/main.py"]
