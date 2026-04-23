@@ -125,17 +125,23 @@ else
 fi
 
 say "4/8 Loading new image from GitHub release…"
+say "    (171 MB download + unpack — expect ~5-10 min on a slow link)"
 # Prefer streaming download — never lands a full tar.gz on disk, so peak
 # /data usage is ~200 MB (image layers) instead of ~370 MB (tar + layers).
 # If that fails (slow link, interrupted connection), fall back to a resumable
 # download + local load so repeated retries don't re-start from zero.
+#
+# --progress-bar writes a '#####' bar to stderr so the user sees actual
+# percentage progress even though stdout is piped into gunzip.
 if curl --connect-timeout 20 --max-time 1800 --retry 5 --retry-delay 10 \
-        --fail --location --silent --show-error "$IMG_URL" \
+        --fail --location --progress-bar "$IMG_URL" \
         | gunzip | docker load; then
     say "    -> streamed image loaded successfully"
 else
     warn "    -> streaming load failed; falling back to resumable file download"
     tarball="$INSTALL_DIR/thermal-analyzer-armv7.tar.gz"
+    # The fallback gives you curl's full progress dashboard by default
+    # (speed, ETA, percent complete) because it's writing to a file, not a pipe.
     curl -fL --retry 20 --retry-delay 10 -C - -o "$tarball" "$IMG_URL"
     gunzip -c "$tarball" | docker load
     rm -f "$tarball"
