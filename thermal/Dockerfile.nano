@@ -57,10 +57,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 # pip from creating a fresh isolated env where it would re-source-compile
 # numpy from scratch (~45 min wasted under QEMU ARMv7). With these already
 # in the venv, the opencv build just reuses them.
+#
+# IMPORTANT: scikit-build must be pinned to 0.17.6 -- opencv-python 4.10.0.84
+# declares this exact version in its pyproject.toml build-system.requires.
+# Newer scikit-build (0.18+, 0.19+) changes the install-classifier signature
+# and breaks on `FileNotFoundError: .../cv2/config-3.py` during packaging.
 RUN /opt/venv/bin/pip install --upgrade pip wheel setuptools \
  && /opt/venv/bin/pip install \
-        "scikit-build>=0.14" \
-        "scikit-build-core>=0.10" \
+        "scikit-build==0.17.6" \
         "pybind11>=2.12"
 
 # Identical cmake flag set to v0.12.0-micro's proven build. BUILD_LIST is
