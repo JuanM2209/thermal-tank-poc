@@ -52,8 +52,16 @@ RUN apk add --no-cache \
 RUN python3 -m venv --system-site-packages /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Upgrade packaging toolchain AND pre-install opencv's PEP 517 build backend
+# directly into the venv. Paired with --no-build-isolation below, this stops
+# pip from creating a fresh isolated env where it would re-source-compile
+# numpy from scratch (~45 min wasted under QEMU ARMv7). With these already
+# in the venv, the opencv build just reuses them.
 RUN /opt/venv/bin/pip install --upgrade pip wheel setuptools \
- && /opt/venv/bin/pip install "scikit-build>=0.14"
+ && /opt/venv/bin/pip install \
+        "scikit-build>=0.14" \
+        "scikit-build-core>=0.10" \
+        "pybind11>=2.12"
 
 # Identical cmake flag set to v0.12.0-micro's proven build. BUILD_LIST is
 # the authoritative whitelist — nothing outside it is compiled.
@@ -94,7 +102,15 @@ ENV ENABLE_CONTRIB=0 \
     CMAKE_BUILD_PARALLEL_LEVEL=4 \
     MAKEFLAGS="-j4"
 
-RUN /opt/venv/bin/pip install --no-binary :all: "opencv-python-headless==4.10.0.84"
+# --no-build-isolation: reuse venv's numpy/pybind11/scikit-build instead of
+#   pip creating an isolated build env and source-compiling numpy again.
+# --no-binary opencv-python-headless: force opencv ITSELF to be source-built
+#   (so our CMAKE_ARGS BUILD_LIST takes effect) but let all other deps come
+#   from wheels when pip needs them.
+RUN /opt/venv/bin/pip install \
+        --no-build-isolation \
+        --no-binary opencv-python-headless \
+        "opencv-python-headless==4.10.0.84"
 
 # Strip + prune the venv. cv2.so goes from ~35 MB -> ~20 MB after strip.
 RUN find /opt/venv -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true \
