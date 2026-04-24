@@ -1,0 +1,129 @@
+# =====================================================================
+# Dockerfile.piwheels -- v0.13.1-piwheels ARMv7 image (Plan B)
+#
+# Target: ~220-260 MB uncompressed / ~80-100 MB compressed.
+# Build time: ~2 min (prebuilt wheels) vs ~40-60 min for Dockerfile.nano
+# (QEMU opencv source compile).
+#
+# Strategy:
+#   Pull opencv-python-headless and numpy as prebuilt ARMv7 wheels from
+#   piwheels.org (the Raspberry Pi wheel mirror). These wheels are linked
+#   against glibc, so we MUST use a Debian base -- alpine's musl would
+#   refuse to load them.
+#
+#   piwheels serves wheels tagged for linux_armv7l + cp311, which is
+#   exactly what python:3.11-slim-bookworm exposes under QEMU ARMv7.
+#
+# Why this is the Plan B:
+#   Dockerfile.nano (alpine + source-built opencv) is smaller on disk
+#   (~90 MB vs ~240 MB) but takes 40-60 min to build under QEMU. The
+#   piwheels path trades ~150 MB of image size for a ~20x build-time
+#   speedup, which is invaluable for iterating on non-cv2 code changes.
+#
+#   Both images produce the SAME dist\thermal-analyzer-armv7.tar.gz so
+#   install-on-nucleus.sh is unchanged.
+#
+# Build:
+#   docker buildx build -f Dockerfile.piwheels --platform linux/arm/v7 \
+#          -t thermal-analyzer:armv7-piwheels --load .
+# =====================================================================
+
+# =========================================================================
+# Builder -- install prebuilt wheels into a venv. Fast: no compilation.
+# =========================================================================
+FROM --platform=linux/arm/v7 python:3.11-slim-bookworm AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Build-stage needs nothing beyond python + pip -- piwheels wheels are
+# fully prebuilt. We still create a venv so the runtime stage gets an
+# isolated, relocatable site-packages tree.
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN /opt/venv/bin/pip install --upgrade pip wheel setuptools
+
+# Prebuilt ARMv7 wheels from piwheels:
+#   - opencv-python-headless 4.10.0.84 (no GTK/X11 -- pure cv2 core)
+#   - numpy 1.26.4 (the version opencv-python-headless 4.10 ABI-matches)
+#
+# --index-url points at piwheels for the armv7 wheels; --extra-index-url
+# falls back to PyPI for any pure-python deps piwheels does not carry.
+# --only-binary ensures pip NEVER source-compiles -- if a wheel is
+# missing we want to fail loudly, not silently fall back to a 30-min
+# QEMU build.
+RUN /opt/venv/bin/pip install \
+        --index-url=https://www.piwheels.org/simple \
+        --extra-index-url=https://pypi.org/simple \
+        --only-binary=:all: \
+        "numpy==1.26.4" \
+        "opencv-python-headless==4.10.0.84"
+
+# Pure-python deps -- pull from PyPI directly. pyyaml has a C extension
+# but ships manylinux ARMv7 wheels on PyPI, so this stays binary-only too.
+RUN /opt/venv/bin/pip install \
+        --only-binary=:all: \
+        "pyyaml==6.0.2" \
+        "flask==3.0.3"
+
+# Strip + prune the venv. cv2.so from piwheels is not stripped; doing so
+# here shaves ~15-20 MB. Also drop caches, tests, .pyi stubs, and cv2's
+# Haar-cascade data/ dir (we don't use any cv2 ML features).
+RUN find /opt/venv -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -name '*.pyi' -delete 2>/dev/null || true \
+ && find /opt/venv -name '*.pyc' -delete 2>/dev/null || true \
+ && rm -rf /opt/venv/lib/python3.11/site-packages/cv2/data 2>/dev/null || true
+
+# =========================================================================
+# Runtime -- slim Debian with only the shared libs cv2.so links against.
+# =========================================================================
+FROM --platform=linux/arm/v7 python:3.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LANG=C.UTF-8 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Runtime shared libs the piwheels cv2.so + numpy were linked against:
+#   libgfortran5            -- numpy BLAS bindings
+#   libopenblas0-pthread    -- numpy linear algebra
+#   libjpeg62-turbo         -- cv2 imgcodecs JPEG
+#   libpng16-16             -- cv2 imgcodecs PNG
+#   libstdc++6              -- cv2 core C++ runtime
+# No GTK/X11/FFmpeg -- this is the headless build.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libgfortran5 \
+        libopenblas0-pthread \
+        libjpeg62-turbo \
+        libpng16-16 \
+        libstdc++6 \
+        ca-certificates \
+        tzdata \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
+ && find /usr/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+ && find /usr/lib/python3.11 -name '*.pyc' -delete 2>/dev/null || true
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Smoke test: fail the build if cv2 / numpy cannot import in the runtime
+# stage. Catches glibc / libstdc++ ABI mismatches before they reach the
+# device.
+RUN /opt/venv/bin/python -c "import cv2, numpy; print('cv2', cv2.__version__, 'numpy', numpy.__version__)"
+
+WORKDIR /app
+COPY app/ /app/
+COPY config.yaml /app/config.yaml
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD /opt/venv/bin/python -c "import os,sys; sys.exit(0 if os.path.exists('/tmp/alive') else 1)"
+
+CMD ["/opt/venv/bin/python", "-u", "/app/main.py"]

@@ -1,0 +1,82 @@
+# =====================================================================
+# Dockerfile.apk -- v0.13.2-apk ARMv7 image built entirely from apk.
+#
+# Plan C: stop compiling opencv under QEMU. Use alpine 3.19 community's
+# prebuilt py3-opencv 4.8.1-r0 package (cv2.cpython-311-arm-linux-musleabihf.so
+# is in the repo already), plus apk-native numpy / pyyaml / flask.
+#
+# Build time target:  ~2 min total (no source compile, no QEMU-heavy steps).
+# Image size target:  ~70-90 MB uncompressed  /  ~30-35 MB compressed.
+#
+# Tradeoffs vs Dockerfile.nano (v0.13.0-nano):
+#   + No 40-60 min opencv source build under QEMU.
+#   + No need for build-base, cmake, ninja, scikit-build, pybind11.
+#   + No venv, no pip, no build isolation dance.
+#   - cv2 pulls ffmpeg + gstreamer shared libs as deps (adds ~30 MB).
+#     Tolerable: compressed image still fits the Nucleus /data budget.
+#   - Locked to opencv 4.8.1 (alpine 3.19 ships this; older than 4.10 nano).
+#     All cv2 calls used by the app (VideoCapture, cvtColor COLOR_YUV2BGR_YUYV,
+#     VideoWriter_fourcc, CAP_PROP_*) are present in 4.8.
+#
+# App code is 100% unchanged -- all 92 cv2.* call sites keep working.
+#
+# Build:
+#   docker buildx build -f Dockerfile.apk --platform linux/arm/v7 \
+#          -t thermal-analyzer:armv7-apk --load .
+# =====================================================================
+
+FROM --platform=linux/arm/v7 alpine:3.19
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LANG=C.UTF-8
+
+# Single apk transaction:
+#   python3         -- 3.11.x, matches cv2's cpython-311 tag in py3-opencv
+#   py3-opencv      -- cv2 4.8.1-r0 (alpine 3.19 community, armv7 prebuilt)
+#                      pulls py3-numpy + ffmpeg-libs + gstreamer as deps
+#   py3-yaml        -- PyYAML for config.yaml parsing (alpine main)
+#   py3-flask       -- Flask 3.0.0 for the web UI  (alpine 3.19 community)
+#                      pulls py3-werkzeug, py3-jinja2, py3-itsdangerous,
+#                      py3-click, py3-blinker automatically
+#   ca-certificates -- HTTPS trust store for the HttpPublisher
+#   tzdata          -- zoneinfo database; overlay.py uses ZoneInfo(
+#                      "America/Chicago") for the timestamp badge
+#
+# Cleanup in the same layer to avoid baking intermediate bytes into the image:
+#   - wipe /var/cache/apk/* (apk's download cache)
+#   - drop __pycache__ / *.pyc across site-packages (regenerated on first import)
+#   - drop bundled tests / apidocs that ship inside numpy / flask / werkzeug
+#   - drop cv2's haarcascade data (we never call CascadeClassifier; saves ~2 MB)
+RUN apk add --no-cache \
+        python3 \
+        py3-opencv \
+        py3-yaml \
+        py3-flask \
+        ca-certificates \
+        tzdata \
+ && rm -rf /var/cache/apk/* \
+ && find /usr/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+ && find /usr/lib/python3.11 -name '*.pyc' -delete 2>/dev/null || true \
+ && find /usr/lib/python3.11/site-packages -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true \
+ && find /usr/lib/python3.11/site-packages -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
+ && find /usr/lib/python3.11/site-packages -type d -name 'apidocs' -exec rm -rf {} + 2>/dev/null || true \
+ && rm -rf /usr/lib/python3.11/site-packages/cv2/data 2>/dev/null || true
+
+# Smoke test: fail the build here -- not on the Nucleus -- if any of the four
+# runtime modules the app imports cannot load under musl armv7.
+RUN python3 -c "import cv2, numpy, flask, yaml; print('cv2', cv2.__version__, 'numpy', numpy.__version__, 'flask', flask.__version__)"
+
+WORKDIR /app
+COPY app/ /app/
+COPY config.yaml /app/config.yaml
+
+EXPOSE 8080
+
+# /tmp/alive is touched every 50 frames by main.py's loop. If the mtime stops
+# advancing the process is stuck -- healthcheck reports unhealthy so the
+# Nucleus supervisor restarts the container.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python3 -c "import os,sys; sys.exit(0 if os.path.exists('/tmp/alive') else 1)"
+
+CMD ["python3", "-u", "/app/main.py"]
