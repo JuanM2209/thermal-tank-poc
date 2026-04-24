@@ -67,9 +67,14 @@ RUN /opt/venv/bin/pip install --upgrade pip wheel setuptools \
         "scikit-build==0.17.6" \
         "pybind11>=2.12"
 
-# Identical cmake flag set to v0.12.0-micro's proven build. BUILD_LIST is
-# the authoritative whitelist — nothing outside it is compiled.
-ENV CMAKE_ARGS="-DBUILD_LIST=core,imgproc,imgcodecs,videoio \
+# BUILD_LIST is the authoritative whitelist -- opencv ignores
+# BUILD_opencv_python3=ON unless python3 is also IN the list. Earlier nano
+# builds omitted it and died at the packaging step with:
+#   FileNotFoundError: ... /cv2/config-3.py
+# because cmake printed "Module opencv_python3 disabled by whitelist" and
+# never generated the config. The BUILD_LIST below is the minimum surface
+# we need plus python3 bindings.
+ENV CMAKE_ARGS="-DBUILD_LIST=core,imgproc,imgcodecs,videoio,python3 \
   -DWITH_FFMPEG=OFF \
   -DWITH_GSTREAMER=OFF \
   -DWITH_1394=OFF \
