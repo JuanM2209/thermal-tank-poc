@@ -1,0 +1,156 @@
+# =====================================================================
+# Dockerfile.nano — v0.13.0-nano ARMv7 image for storage-constrained Nucleus
+#
+# Target: ~90-100 MB uncompressed  /  ~35-45 MB compressed
+# Previous (v0.12.0-micro):  ~400 MB uncompressed on disk — too big for the
+# Nucleus /data partition (1.4 GB total, ~530 MB free). docker load hit
+# ENOSPC mid-unpack on numpy/libavformat layers.
+#
+# Size wins over Dockerfile.micro:
+#   1. alpine:3.19 base  (~7 MB)  instead of python:3.11-slim-bookworm (~130 MB)
+#      => ~85 MB saved on the base alone.
+#   2. alpine-native py3-numpy (apk, no compile, ~20 MB) instead of pip manylinux wheel (~30 MB).
+#      The alpine build is slimmer because it shares libopenblas with the system.
+#   3. Same surgical opencv source build as v0.12.0-micro, only:
+#        core + imgproc + imgcodecs + videoio
+#      Cross-compiled against musl this time (alpine's libc).
+#   4. App code is 100 % unchanged — all 92 cv2.* call sites keep working.
+#
+# Build:
+#   docker buildx build -f Dockerfile.nano --platform linux/arm/v7 \
+#          -t thermal-analyzer:armv7-nano --load .
+# =====================================================================
+
+# =========================================================================
+# Builder — compile cv2.so against musl. ~40-60 min under QEMU ARMv7.
+# =========================================================================
+FROM --platform=linux/arm/v7 alpine:3.19 AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1
+
+RUN apk add --no-cache \
+        build-base \
+        cmake \
+        ninja \
+        git \
+        pkgconf \
+        linux-headers \
+        python3 \
+        python3-dev \
+        py3-pip \
+        py3-numpy \
+        py3-numpy-dev \
+        libjpeg-turbo-dev \
+        libpng-dev \
+        v4l-utils-dev
+
+# A venv that inherits the system numpy (which already lives at
+# /usr/lib/python3.11/site-packages/numpy via apk). This avoids rebuilding
+# numpy from source, which would take ~20 min on QEMU ARMv7 and add no value.
+RUN python3 -m venv --system-site-packages /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN /opt/venv/bin/pip install --upgrade pip wheel setuptools \
+ && /opt/venv/bin/pip install "scikit-build>=0.14"
+
+# Identical cmake flag set to v0.12.0-micro's proven build. BUILD_LIST is
+# the authoritative whitelist — nothing outside it is compiled.
+ENV CMAKE_ARGS="-DBUILD_LIST=core,imgproc,imgcodecs,videoio \
+  -DWITH_FFMPEG=OFF \
+  -DWITH_GSTREAMER=OFF \
+  -DWITH_1394=OFF \
+  -DWITH_V4L=ON \
+  -DWITH_LIBV4L=ON \
+  -DWITH_TIFF=OFF \
+  -DWITH_WEBP=OFF \
+  -DWITH_OPENJPEG=OFF \
+  -DWITH_JASPER=OFF \
+  -DWITH_OPENEXR=OFF \
+  -DWITH_EIGEN=OFF \
+  -DWITH_PROTOBUF=OFF \
+  -DWITH_QUIRC=OFF \
+  -DWITH_ADE=OFF \
+  -DWITH_IPP=OFF \
+  -DWITH_ITT=OFF \
+  -DWITH_LAPACK=OFF \
+  -DWITH_GTK=OFF \
+  -DWITH_QT=OFF \
+  -DWITH_OPENCL=OFF \
+  -DWITH_CUDA=OFF \
+  -DBUILD_TESTS=OFF \
+  -DBUILD_PERF_TESTS=OFF \
+  -DBUILD_EXAMPLES=OFF \
+  -DBUILD_DOCS=OFF \
+  -DBUILD_JAVA=OFF \
+  -DBUILD_opencv_python3=ON \
+  -DBUILD_opencv_python2=OFF \
+  -DBUILD_opencv_apps=OFF \
+  -DCMAKE_BUILD_TYPE=Release"
+
+ENV ENABLE_CONTRIB=0 \
+    ENABLE_HEADLESS=1 \
+    CMAKE_BUILD_PARALLEL_LEVEL=4 \
+    MAKEFLAGS="-j4"
+
+RUN /opt/venv/bin/pip install --no-binary :all: "opencv-python-headless==4.10.0.84"
+
+# Strip + prune the venv. cv2.so goes from ~35 MB -> ~20 MB after strip.
+RUN find /opt/venv -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -name '*.pyi' -delete 2>/dev/null || true \
+ && find /opt/venv -name '*.pyc' -delete 2>/dev/null || true \
+ && rm -rf /opt/venv/lib/python3.11/site-packages/cv2/data 2>/dev/null || true
+
+# App runtime deps — tiny, prefer pip because alpine's py3-flask pulls
+# py3-werkzeug + py3-jinja2 + py3-itsdangerous as separate system packages
+# which re-fragments site-packages across the filesystem. Pinning via pip
+# keeps them all inside the venv for clean copying.
+RUN /opt/venv/bin/pip install --no-cache-dir "pyyaml==6.0.2" "flask==3.0.3"
+
+# =========================================================================
+# Runtime — minimal alpine with just the shared libs cv2.so was linked against.
+# =========================================================================
+FROM --platform=linux/arm/v7 alpine:3.19
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LANG=C.UTF-8 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Runtime shared libs our custom cv2.so needs:
+#   libjpeg-turbo  — imgcodecs JPEG read/write
+#   libpng         — imgcodecs PNG read/write
+#   v4l-utils-libs — videoio V4L2 helpers (libv4l2, libv4lconvert)
+# Plus python3 + the alpine-native numpy that our venv inherits.
+RUN apk add --no-cache \
+        python3 \
+        py3-numpy \
+        libjpeg-turbo \
+        libpng \
+        v4l-utils-libs \
+        ca-certificates \
+        tzdata \
+ && rm -rf /var/cache/apk/* \
+ && find /usr/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+ && find /usr/lib/python3.11 -name '*.pyc' -delete 2>/dev/null || true
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Smoke test: fail the build if cv2 / numpy can't import inside the runtime
+# stage. Catches musl linker mismatches before they ever hit the device.
+RUN /opt/venv/bin/python -c "import numpy, cv2; print('numpy', numpy.__version__, 'cv2', cv2.__version__)"
+
+WORKDIR /app
+COPY app/ /app/
+COPY config.yaml /app/config.yaml
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD /opt/venv/bin/python -c "import os,sys; sys.exit(0 if os.path.exists('/tmp/alive') else 1)"
+
+CMD ["/opt/venv/bin/python", "-u", "/app/main.py"]

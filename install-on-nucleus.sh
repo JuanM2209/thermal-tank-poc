@@ -4,10 +4,25 @@
 #
 # Does everything in one shot:
 #   1. Stops & removes the previous thermal-analyzer container + old images
-#   2. Downloads the new ARMv7 image tarball + config.yaml from the release
-#   3. docker load + docker run with --device=/dev/video0 --network host
-#   4. Safely merges the Node-RED supervisor flow into the existing NR
+#   2. Scrubs stale residue from prior failed installs (orphan tarballs,
+#      half-extracted venv dirs in $INSTALL_DIR) — IMPORTANT for Nucleus
+#      devices where /data only has ~500 MB free.
+#   3. Downloads the new ARMv7 image tarball + config.yaml from the release
+#   4. docker load + docker run with --device=/dev/video0 --network host
+#   5. Safely merges the Node-RED supervisor flow into the existing NR
 #      (only touches the thermal-tab; leaves other flows alone)
+#
+# SAFETY: this installer is SURGICAL. It only ever touches:
+#   - container named "thermal-analyzer"
+#   - images tagged "thermal-analyzer:*"
+#   - truly dangling <none>:<none> layers (docker image prune -f)
+#   - files under $INSTALL_DIR (defaults to /home/admin/thermal)
+# It will NEVER:
+#   - touch other containers (Node-RED, remote-support, cockpit, etc.)
+#   - touch other tagged images
+#   - touch named volumes
+#   - modify /etc/docker/daemon.json or restart the docker daemon
+#   - alter iptables, networks, or any host-level config
 #
 # Idempotent — re-run after every release to upgrade in place.
 #
@@ -22,7 +37,7 @@ set -eu
 # -----------------------------------------------------------------------------
 GH_USER="JuanM2209"
 GH_REPO="thermal-tank-poc"
-TAG="v0.11.0-slim"
+TAG="v0.13.0-nano"
 # -----------------------------------------------------------------------------
 
 IMG="thermal-analyzer:armv7"
@@ -74,13 +89,15 @@ cd "$INSTALL_DIR"
 #   - thermal-analyzer container (exact name)
 #   - thermal-analyzer:* images (tag match only)
 #   - dangling <none>:<none> layers (orphans from prior failed `docker load`)
-#   - thermal-analyzer-armv7.tar.gz files on disk
+#   - thermal-analyzer-armv7.tar.gz tarballs anywhere on the box
+#   - $INSTALL_DIR tank-dashboard-flow.json (safely re-downloadable)
 #
 # WHAT WE DO NOT TOUCH:
 #   - any other tagged image
 #   - any other container (running or stopped)
 #   - any volume (no --volumes)
 #   - any network
+#   - $INSTALL_DIR/config.yaml or $INSTALL_DIR/data/* (user state)
 # -------------------------------------------------------------------------
 say "2b/8 Reclaiming space from prior failed thermal-analyzer installs…"
 if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
@@ -92,20 +109,35 @@ docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
 # Dangling <none>:<none> layers ONLY — safe on production, does not affect
 # any tagged image, any container, any volume, any network.
 docker image prune -f >/dev/null 2>&1 || true
+
+# Stale tarballs from prior streaming-fallback downloads that got interrupted.
+# Previous v0.12.0-micro failures left ~180 MB of dead bytes in these spots.
 rm -f "$INSTALL_DIR/thermal-analyzer-armv7.tar.gz" \
       /root/apps/thermal-analyzer-armv7.tar.gz \
       /home/admin/thermal-analyzer-armv7.tar.gz \
-      /data/thermal-analyzer-armv7.tar.gz 2>/dev/null || true
+      /home/admin/thermal/thermal-analyzer-armv7.tar.gz \
+      /data/thermal-analyzer-armv7.tar.gz \
+      /data/thermal/thermal-analyzer-armv7.tar.gz \
+      /data/home/admin/thermal/thermal-analyzer-armv7.tar.gz \
+      /tmp/thermal/thermal-analyzer-armv7.tar.gz \
+      /tmp/thermal-analyzer-armv7.tar.gz 2>/dev/null || true
+
+# Stale dashboard flow JSON — always re-downloaded below, no reason to keep.
+rm -f "$INSTALL_DIR/tank-dashboard-flow.json" 2>/dev/null || true
 
 # -------------------------------------------------------------------------
 # Free-space precheck — fail fast if the partition can't fit the image
-# (~200 MB uncompressed + working headroom).
+# (~100 MB uncompressed + working headroom).
 # -------------------------------------------------------------------------
 docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
 # Fall back to /data if we can't introspect the mount
 avail_kb=$(df -Pk "$docker_root" 2>/dev/null | awk 'NR==2 {print $4}')
 avail_kb=${avail_kb:-0}
-need_kb=358400   # 350 MB minimum — 200 MB image + 150 MB headroom
+# 150 MB minimum. v0.13.0-nano image is ~90-100 MB uncompressed. Docker's
+# overlay2 unpack needs roughly 1.3x the image size as peak working space
+# (layer extraction + final diff dir). Previous gates of 256/350/450 MB
+# were sized for v0.11/v0.12 which were much larger images.
+need_kb=150000
 if [ "$avail_kb" -lt "$need_kb" ]; then
     err "only ${avail_kb} KB free on $docker_root — need at least ${need_kb} KB"
     err "safe commands to reclaim space WITHOUT affecting other containers/volumes:"
@@ -116,6 +148,22 @@ if [ "$avail_kb" -lt "$need_kb" ]; then
 fi
 say "    -> $(df -Ph "$docker_root" | awk 'NR==2 {print $4 " free on " $6}')"
 
+# -------------------------------------------------------------------------
+# Trap mid-script failure — a crashed docker load / extract leaves orphan
+# overlay layers that silently eat /data. The EXIT trap runs on any exit
+# path (normal or error), and the shell's $? tells us if we failed.
+# -------------------------------------------------------------------------
+_cleanup_on_failure() {
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        warn "install failed mid-run — reclaiming orphan layers and tarballs"
+        docker image prune -f >/dev/null 2>&1 || true
+        rm -f "$INSTALL_DIR/thermal-analyzer-armv7.tar.gz" 2>/dev/null || true
+    fi
+    exit $rc
+}
+trap _cleanup_on_failure EXIT
+
 say "3/8 Downloading config.yaml (only if absent)…"
 if [ ! -f config.yaml ]; then
     curl -fsSL "$CFG_URL" -o config.yaml
@@ -125,9 +173,9 @@ else
 fi
 
 say "4/8 Loading new image from GitHub release…"
-say "    (171 MB download + unpack — expect ~5-10 min on a slow link)"
+say "    (~35-45 MB download + unpack — expect <1 min on a normal link)"
 # Prefer streaming download — never lands a full tar.gz on disk, so peak
-# /data usage is ~200 MB (image layers) instead of ~370 MB (tar + layers).
+# /data usage is ~100 MB (image layers) instead of ~140 MB (tar + layers).
 # If that fails (slow link, interrupted connection), fall back to a resumable
 # download + local load so repeated retries don't re-start from zero.
 #
