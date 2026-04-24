@@ -1,5 +1,5 @@
 # =====================================================================
-# build-nano.ps1 — build the NANO ARMv7 image (v0.13.0-nano)
+# build-nano.ps1 -- build the NANO ARMv7 image (v0.13.0-nano)
 #
 # Uses thermal/Dockerfile.nano: alpine 3.19 base + custom source-built
 # opencv (core+imgproc+imgcodecs+videoio only) + alpine-native numpy.
@@ -82,10 +82,10 @@ $size = (Get-Item $gz).Length
 Write-Host ("   -> {0}  ({1:N1} MB compressed)" -f $gz, ($size/1MB)) -ForegroundColor Green
 
 # Sanity gate: if the image came out bigger than the slim (v0.11) it means
-# something in the pipeline silently regressed — stop before publishing.
+# something in the pipeline silently regressed -- stop before publishing.
 $maxMB = 80
 if (($size / 1MB) -gt $maxMB) {
-    Fail "Compressed image is $([math]::Round($size/1MB,1)) MB — exceeds $maxMB MB nano budget. Review Dockerfile.nano before releasing."
+    Fail "Compressed image is $([math]::Round($size/1MB,1)) MB - exceeds $maxMB MB nano budget. Review Dockerfile.nano before releasing."
 }
 
 $sha = (Get-FileHash $gz -Algorithm SHA256).Hash.ToLower()
